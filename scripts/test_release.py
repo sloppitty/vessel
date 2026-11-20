@@ -209,6 +209,30 @@ class ChangelogFreezeTests(unittest.TestCase):
         subjects = 'fix(a): one (#10)', 'feat(b): two (#11)', 'Merge pull request #12 from owner/c'
         self.assertEqual('1.2.3', self.release(changelog, *subjects, tag=True))
 
+    def test_a_commit_that_only_mentions_the_version_is_not_the_release_pull_request(self):
+        with self.assertRaisesRegex(release.ReleaseError, r'merged since v1.2.2: #15\. Name each'):
+            self.release('## 1.2.3 - October 2, 2026\n\n- A fix (#10).\n', 'fix(a): one (#10)',
+                         'docs: say 1.2.3 is next (#15)')
+
+    def test_a_release_merged_as_a_merge_commit_is_exempt_whatever_its_branch_is_called(self):
+        self.commit('fix(a): one (#10)')
+        self.git('switch', '-q', '-c', 'release-next')
+        write_release(self.root, **{'CHANGELOG.md': '# Changelog\n\n## 1.2.3 - October 2, 2026\n\n- A fix (#10).\n'})
+        self.commit('chore(release): prepare the next release')
+        self.git('switch', '-q', 'main')
+        self.git('merge', '-q', '--no-ff', '-m', 'Merge pull request #13 from owner/release-next', 'release-next')
+        self.assertEqual('1.2.3', release.check(self.root, 'v1.2.3'))
+        # A pull request merged after it still has to be named.
+        self.commit('feat(b): late (#14)')
+        with self.assertRaisesRegex(release.ReleaseError, r'#14\. Name each'):
+            release.check(self.root, 'v1.2.3')
+
+    def test_a_squashed_release_is_exempt_whatever_its_subject_says(self):
+        self.commit('fix(a): one (#10)')
+        write_release(self.root, **{'CHANGELOG.md': '# Changelog\n\n## 1.2.3 - October 2, 2026\n\n- A fix (#10).\n'})
+        self.commit('chore: next release (#16)')
+        self.assertEqual('1.2.3', release.check(self.root, 'v1.2.3'))
+
     def test_the_tagged_commit_is_compared_not_a_later_head(self):
         self.release('## 1.2.3 - October 2, 2026\n\nPull requests: #10.\n', 'fix(a): one (#10)', tag=True)
         self.commit('feat(c): after the tag (#14)')

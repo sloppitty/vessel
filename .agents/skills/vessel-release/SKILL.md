@@ -39,7 +39,8 @@ only for a change that needs them.
    names, upgrade requirements and known limits. Preserve historical entries.
    Name every pull request merged since the previous tag as `#N`, in the entry
    for its change or in a closing `Pull requests: #N, …` line for those that
-   changed nothing owner-facing. The release pull request itself is exempt.
+   changed nothing owner-facing. The release pull request itself (the one
+   that adds `docs/releases/vX.Y.Z.md`) is exempt.
 3. Write `docs/releases/vX.Y.Z.md`: owner-facing highlights, upgrade steps,
    image tags and known limits. It becomes the GitHub Release body, so link
    repository files with absolute `https://github.com/<owner>/<repo>/blob/vX.Y.Z/...`

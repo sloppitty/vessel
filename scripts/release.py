@@ -86,7 +86,8 @@ def pull_request(subject):
 
 def unlisted_pull_requests(root, version, tag):
     """Pull requests merged on main since the previous release tag that the version's changelog section does not
-    name as #N, with that tag. The release pull request itself (its subject names the version) is exempt."""
+    name as #N, with that tag. The release pull request itself, the one whose merge or squash commit adds the
+    version's release notes, is exempt."""
     def git(*args):
         result = subprocess.run(['git', *args], cwd=root, text=True, capture_output=True)
         return result.stdout.strip() if result.returncode == 0 else None
@@ -100,8 +101,12 @@ def unlisted_pull_requests(root, version, tag):
     subjects = git('log', '--first-parent', '--format=%s', f'{previous}..{revision}')
     if subjects is None:
         raise ReleaseError(f'Cannot list the commits between {previous} and {tag}')
-    own = re.compile(rf'(?<![\d.]){re.escape(version)}(?![\d.])')
-    numbers = {pull_request(subject) for subject in subjects.splitlines() if not own.search(subject)} - {None}
+    preparation = git('log', '--first-parent', '--diff-merges=first-parent', '--diff-filter=A', '--format=%s',
+                      f'{previous}..{revision}', '--', f'docs/releases/v{version}.md')
+    if preparation is None:
+        raise ReleaseError(f'Cannot find the commit that added the v{version} release notes')
+    exempt = {pull_request(subject) for subject in preparation.splitlines()}
+    numbers = {pull_request(subject) for subject in subjects.splitlines()} - exempt - {None}
     text = (root / 'CHANGELOG.md').read_text()
     section = re.search(rf'^## {re.escape(version)} - .*?(?=^## |\Z)', text, re.MULTILINE | re.DOTALL)[0]
     return previous, sorted(n for n in numbers if not re.search(rf'#{n}(?!\d)', section))
