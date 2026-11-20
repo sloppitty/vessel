@@ -235,7 +235,6 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Api/ConfigurationCheckCommand.cs|6b2800edbcdbc02cc269ece1fc14dc17eb65509e769b341b8c0807731ff6a605",
             // Issue #106: session settings only (lock_timeout/statement_timeout lifted for one transaction, statement or session,
             // and restored); they read and write no rows.
-            "Vessel.Identity/IdentityCleanup.cs|e06f3c7d027e0dbbbf87e8ee03ee9fd9cfa2633dfb6814e24bbe872c783ef37b",
             "Vessel.Persistence/DatabaseLimits.cs|356dcdca767da41cf842c7c389614cc17ed3d6ab3d743c7e15d7b188a4a2ff0f",
             "Vessel.Persistence/DatabaseLimits.cs|a90032ef553cc437ed6894ebdfa82d60cb6a08f03c8e96a0eac47f1d05b95d0d",
             "Vessel.Persistence/DatabaseLimits.cs|b8159ffebcfd73323056211d32d1c29757a6201c0f4db4de61e9d4906f09a0a2",

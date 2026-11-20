@@ -53,7 +53,9 @@ public sealed class SessionAuthentication(
             principal.ErrorStatusCode = error.StatusCode;
             return AuthenticateResult.Fail("The session is not valid.");
         }
-        catch (Exception error) when (error is DbException or TimeoutException)
+        // A lock or statement timeout is the database being busy, not identity being down: it reaches the API's error
+        // handler, which answers the same 503 with Retry-After as every other busy request.
+        catch (Exception error) when ((error is DbException or TimeoutException) && !DatabaseBusy.Is(error))
         {
             throw IdentityErrors.Error(503, "identity-unavailable");
         }

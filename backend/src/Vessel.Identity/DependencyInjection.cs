@@ -65,7 +65,7 @@ internal sealed class IdentityContextFactory(IConfiguration configuration, Ident
         if (string.IsNullOrWhiteSpace(configuration.GetConnectionString("Vessel")))
             throw IdentityErrors.Error(503, "identity-unavailable");
         var options = new DbContextOptionsBuilder<IdentityDbContext>();
-        // The host's one pool (registered with persistence), never a second one built from the connection string.
+        // The host's directory pool (see Vessel.Persistence.DatabasePools), never one built from the connection string.
         IdentityDbContext.Configure(options, services.GetRequiredService<NpgsqlDataSource>(), schema);
         options.ConfigureWarnings(warnings => warnings.Log(
             (RelationalEventId.ConnectionError, LogLevel.Debug), (RelationalEventId.CommandError, LogLevel.Debug),

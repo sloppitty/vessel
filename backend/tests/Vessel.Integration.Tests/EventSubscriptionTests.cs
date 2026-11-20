@@ -158,6 +158,32 @@ public sealed partial class EventSubscriptionTests
         Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
     }
 
+    // Issue #106: a second live delivery waits for the first to commit, past the lock timeout, whether it waits at the
+    // owner's first-time initialization or at the receipt the first dispatcher inserted and has not committed.
+    [VesselEventPostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_second_live_delivery_waits_past_the_lock_timeout_for_the_first_to_commit(bool initialized)
+    {
+        await using var runtime = await Runtime.CreateAsync(lockTimeout: TimeSpan.FromSeconds(1));
+        var contended = await runtime.RegisterNewAsync("contended-live");
+        if (initialized)
+        {
+            var earlier = await runtime.AppendAsync(Draft("earlier"));
+            Assert.Equal(DispatchOutcome.Delivered, (await runtime.DispatchAsync(contended, earlier.Id)).Outcome);
+        }
+        var slow = await runtime.AppendAsync(Draft("live-slow"));
+        var first = runtime.DispatchAsync(contended, slow.Id);
+        await runtime.Subscriber.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = runtime.DispatchAsync(contended, slow.Id);
+        await Task.Delay(TimeSpan.FromMilliseconds(1800));
+        Assert.False(second.IsCompleted, second.IsFaulted ? second.Exception!.GetBaseException().Message : "The second delivery did not wait.");
+        runtime.Subscriber.Release.TrySetResult();
+        Assert.Equal(DispatchOutcome.Delivered, (await first).Outcome);
+        Assert.Equal(DispatchOutcome.AlreadySettled, (await second).Outcome);
+        Assert.Equal(1, runtime.Subscriber.Calls(slow.Id));
+    }
+
     // Round 2: the receipt stays locked while a failed attempt is rolled back and recorded, so a concurrent
     // dispatcher cannot run the handler again in between.
     [VesselEventPostgresFact]
@@ -620,7 +646,7 @@ public sealed partial class EventSubscriptionTests
     {
         private readonly ServiceProvider provider;
 
-        private Runtime(CoreDatabase database, VesselEventSettings? settings)
+        private Runtime(CoreDatabase database, VesselEventSettings? settings, TimeSpan? lockTimeout)
         {
             Database = database;
             Reader = database.Context(Owner);
@@ -628,7 +654,8 @@ public sealed partial class EventSubscriptionTests
             {
                 ["ConnectionStrings:Vessel"] = database.ConnectionString,
                 ["Vessel:Auth:OwnerId"] = Owner.ToString(),
-                ["Vessel:Events:RetentionBatch"] = (settings?.RetentionBatch ?? 1000).ToString()
+                ["Vessel:Events:RetentionBatch"] = (settings?.RetentionBatch ?? 1000).ToString(),
+                ["Vessel:Database:LockTimeout"] = lockTimeout?.ToString("c")
             }).Build();
             var services = new ServiceCollection();
             services.AddLogging();
@@ -657,8 +684,8 @@ public sealed partial class EventSubscriptionTests
         public VesselDbContext Reader { get; }
         public IConfiguration Configuration { get; }
 
-        public static async Task<Runtime> CreateAsync(VesselEventSettings? settings = null) =>
-            new(await CoreDatabase.CreateAsync(), settings);
+        public static async Task<Runtime> CreateAsync(VesselEventSettings? settings = null, TimeSpan? lockTimeout = null) =>
+            new(await CoreDatabase.CreateAsync(), settings, lockTimeout);
 
         public AsyncServiceScope Scope() => provider.CreateAsyncScope();
         public IOwnerScopeFactory OwnerScopes => provider.GetRequiredService<IOwnerScopeFactory>();

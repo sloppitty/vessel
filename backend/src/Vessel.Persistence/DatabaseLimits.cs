@@ -54,14 +54,12 @@ public sealed record DatabaseLimits(TimeSpan LockTimeout, TimeSpan StatementTime
         }
     }
 
-    /// <summary>The data source for request and worker hosts: the connection string plus these limits as startup options.</summary>
-    internal NpgsqlDataSource Create(string connection)
+    /// <summary>Request and worker hosts: these limits join the connection's startup options.</summary>
+    internal void Apply(NpgsqlConnectionStringBuilder connection)
     {
-        var builder = new NpgsqlDataSourceBuilder(connection);
         var options = $"-c lock_timeout={LockTimeout.TotalMilliseconds:0} -c statement_timeout={StatementTimeout.TotalMilliseconds:0}";
-        var existing = builder.ConnectionStringBuilder.Options;
-        builder.ConnectionStringBuilder.Options = string.IsNullOrWhiteSpace(existing) ? options : existing + " " + options;
-        return builder.Build();
+        var existing = connection.Options;
+        connection.Options = string.IsNullOrWhiteSpace(existing) ? options : existing + " " + options;
     }
 
     /// <summary>

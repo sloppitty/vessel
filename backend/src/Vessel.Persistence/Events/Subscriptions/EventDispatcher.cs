@@ -76,6 +76,10 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         DispatchTrigger trigger, Attempt attempt, CancellationToken ct)
     {
         await LockRetentionSharedAsync(ct);
+        var live = trigger != DispatchTrigger.CatchUp;
+        // Live delivery waits, by design, for another dispatcher of this owner and subscription to commit: its first-time
+        // initialization, then its receipt. No lock limit from here until the receipt is locked (LockReceiptAsync restores it).
+        if (live) await VesselEventSql.ExecuteAsync(db, DatabaseLimits.LiftLockLimit, ct);
         var responsible = await SubscriptionProgress.InitializeAsync(db, subscription, logger, ct);
         if (responsible is null) return DispatchOutcome.NotResponsible;
         var retained = await RetainedAsync(eventId, ct);
@@ -85,12 +89,7 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         if (sequence <= floor) return DispatchOutcome.Historical;
         if (sequence <= responsible || !subscription.Matches(type)) return DispatchOutcome.NotResponsible;
 
-        await VesselEventSql.ExecuteAsync(db, """
-            INSERT INTO event_receipts(owner_id,subscription,event_id,sequence,state,attempts,max_attempts,next_attempt_at,created_at)
-            VALUES(@owner,@name,@id,@sequence,'pending',0,@max,@now,@now) ON CONFLICT DO NOTHING
-            """, ct, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("id", eventId), ("sequence", sequence),
-            ("max", subscription.Limits.MaxAttempts), ("now", time.GetUtcNow()));
-        var receipt = await LockReceiptAsync(subscription.Name, eventId, skipLocked: trigger == DispatchTrigger.CatchUp, ct);
+        var receipt = await LockReceiptAsync(subscription, eventId, sequence, time.GetUtcNow(), skipLocked: !live, ct);
         if (receipt is null) return DispatchOutcome.Busy;
         var (state, attempts, maxAttempts, nextAttemptAt) = receipt.Value;
         if (Terminal.Contains(state)) return DispatchOutcome.AlreadySettled;
@@ -140,12 +139,7 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
             return DispatchOutcome.Historical;
         if (!await ResponsibleAsync(subscription, retained.Sequence, retained.Type, ct)) return DispatchOutcome.NotResponsible;
         var now = time.GetUtcNow();
-        await VesselEventSql.ExecuteAsync(db, """
-            INSERT INTO event_receipts(owner_id,subscription,event_id,sequence,state,attempts,max_attempts,next_attempt_at,created_at)
-            VALUES(@owner,@name,@id,@sequence,'pending',0,@max,@now,@now) ON CONFLICT DO NOTHING
-            """, ct, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("id", eventId), ("sequence", retained.Sequence),
-            ("max", subscription.Limits.MaxAttempts), ("now", now));
-        if (await LockReceiptAsync(subscription.Name, eventId, skipLocked: false, ct) is not { } receipt)
+        if (await LockReceiptAsync(subscription, eventId, retained.Sequence, now, skipLocked: false, ct) is not { } receipt)
             return DispatchOutcome.Busy;
         // Another dispatcher settled or attempted it after this attempt's rollback: its record stands.
         if (Terminal.Contains(receipt.State)) return DispatchOutcome.AlreadySettled;
@@ -226,16 +220,23 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
             _ => DispatchOutcome.InvalidOwner
         };
 
+    /// <summary>Creates the receipt if it is missing, then locks it (or skips it while another dispatcher holds it).</summary>
     private async Task<(string State, int Attempts, int MaxAttempts, DateTimeOffset NextAttemptAt)?> LockReceiptAsync(
-        string subscription, Guid eventId, bool skipLocked, CancellationToken ct)
+        EventSubscription subscription, Guid eventId, long sequence, DateTimeOffset now, bool skipLocked, CancellationToken ct)
     {
-        // Live delivery waits for the dispatcher that holds the receipt, by design: no lock limit for that wait.
+        // Live delivery waits for the dispatcher that holds the receipt, by design: no lock limit for that wait. It
+        // starts at the insert, which already waits when another dispatcher inserted the same receipt and has not committed.
         if (!skipLocked) await VesselEventSql.ExecuteAsync(db, DatabaseLimits.LiftLockLimit, ct);
+        await VesselEventSql.ExecuteAsync(db, """
+            INSERT INTO event_receipts(owner_id,subscription,event_id,sequence,state,attempts,max_attempts,next_attempt_at,created_at)
+            VALUES(@owner,@name,@id,@sequence,'pending',0,@max,@now,@now) ON CONFLICT DO NOTHING
+            """, ct, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("id", eventId), ("sequence", sequence),
+            ("max", subscription.Limits.MaxAttempts), ("now", now));
         (string, int, int, DateTimeOffset)? receipt = null;
         await using (var command = VesselEventSql.TransactionCommand(db, $"""
             SELECT state,attempts,max_attempts,next_attempt_at FROM event_receipts
             WHERE owner_id=@owner AND subscription=@name AND event_id=@id FOR UPDATE{(skipLocked ? " SKIP LOCKED" : "")}
-            """, ("owner", db.CurrentOwnerId), ("name", subscription), ("id", eventId)))
+            """, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("id", eventId)))
         await using (var row = await command.ExecuteReaderAsync(ct))
             if (await row.ReadAsync(ct))
                 receipt = (row.GetString(0), row.GetInt32(1), row.GetInt32(2), row.GetFieldValue<DateTimeOffset>(3));

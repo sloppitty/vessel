@@ -198,9 +198,21 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     public async Task<bool> RunAsync(MonitorLease lease, CancellationToken ct)
     {
         if (lease.OwnerId != owner.OwnerId) throw new InvalidOperationException("A monitor lease belongs to another owner.");
-        var capture = await store.CaptureAsync(lease.AccountId, ct);
-        if (capture is null) return false;
-        var before = await store.FindAsync(lease.AccountId, ct);
+        MonitorCapture? capture;
+        MonitorAccount? before;
+        try
+        {
+            capture = await store.CaptureAsync(lease.AccountId, ct);
+            if (capture is null) return false;
+            before = await store.FindAsync(lease.AccountId, ct);
+        }
+        catch (Exception ex) when (DatabaseBusy.Is(ex))
+        {
+            // A busy database before the run started: release the lease as an interrupted run of its kind would (a backfill
+            // or funding read stays due), record no venue failure, and let the caller or the next run retry.
+            await ReleaseUnstartedAsync(lease);
+            throw;
+        }
         if (before is null || !before.Owns(lease.Generation, lease.WorkerId, time.GetUtcNow())) return false;
         if (lease.Trigger == "backfill") return await RunBackfillAsync(lease, capture, ct);
         if (lease.Trigger == "funding") return await RunFundingAsync(lease, capture, ct);
@@ -857,6 +869,21 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
 
     /// <summary>The account no longer qualifies, or the run was interrupted, before any result: not a failure.</summary>
     /// <param name="attempted">False before any venue read: housekeeping then only ages outstanding work.</param>
+    private Task<bool> ReleaseUnstartedAsync(MonitorLease lease) => lease.Trigger switch
+    {
+        "backfill" => unitOfWork.ExecuteAsync(async () =>
+        {
+            await store.ReleaseBackfillAsync(lease, time.GetUtcNow(), CancellationToken.None);
+            return true;
+        }, CancellationToken.None),
+        "funding" => unitOfWork.ExecuteAsync(async () =>
+        {
+            await store.ReleaseFundingAsync(lease, time.GetUtcNow(), null, CancellationToken.None);
+            return true;
+        }, CancellationToken.None),
+        _ => SupersedeAsync(lease, CancellationToken.None, attempted: false),
+    };
+
     private Task<bool> SupersedeAsync(MonitorLease lease, CancellationToken ct, bool attempted = true) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {

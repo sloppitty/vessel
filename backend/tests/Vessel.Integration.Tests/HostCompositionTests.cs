@@ -64,7 +64,7 @@ public sealed class HostCompositionTests
     }
 
     [Fact]
-    public void Api_and_worker_contexts_borrow_the_one_registered_data_source()
+    public void Api_and_worker_contexts_borrow_the_registered_journal_and_directory_pools()
     {
         var owner = Guid.NewGuid();
         using var api = new CoreApiFactory(owner, connection: UnusedDatabase);
@@ -72,12 +72,15 @@ public sealed class HostCompositionTests
         foreach (var services in new[] { api.Services, worker.Services })
         {
             using var scope = services.CreateScope();
-            var pool = services.GetRequiredService<NpgsqlDataSource>();
-            // A context built from the connection string would carry that string and its own data source (a second pool).
-            Assert.Same(pool, DataSourceOf(scope.ServiceProvider.GetRequiredService<VesselDbContext>()));
-            Assert.Same(pool, DataSourceOf(scope.ServiceProvider.GetRequiredService<IdentityDbContext>()));
+            var journal = services.GetRequiredKeyedService<NpgsqlDataSource>(DatabasePools.Journal);
+            var directory = services.GetRequiredService<NpgsqlDataSource>();
+            // Separate pools, so a unit holding a journal connection never waits for its own pool to read identity.
+            Assert.NotSame(journal, directory);
+            // A context built from the connection string would carry that string and its own data source (another pool).
+            Assert.Same(journal, DataSourceOf(scope.ServiceProvider.GetRequiredService<VesselDbContext>()));
+            Assert.Same(directory, DataSourceOf(scope.ServiceProvider.GetRequiredService<IdentityDbContext>()));
             using var created = services.GetRequiredService<IDbContextFactory<IdentityDbContext>>().CreateDbContext();
-            Assert.Same(pool, DataSourceOf(created));
+            Assert.Same(directory, DataSourceOf(created));
         }
     }
 

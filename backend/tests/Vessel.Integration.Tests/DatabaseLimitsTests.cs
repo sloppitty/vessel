@@ -6,12 +6,18 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.Internal;
+using Nethereum.Signer;
 using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Monitoring;
 using Vessel.Application.Ownership;
+using Vessel.Identity;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
+using Vessel.Tests.Identity;
+using Vessel.Worker;
 
 namespace Vessel.Tests;
 
@@ -140,6 +146,89 @@ public sealed class DatabaseLimitsTests
     }
 
     [PostgresFact]
+    public async Task Same_owner_admissions_wait_past_the_lock_timeout_behind_a_slow_venue_read()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        await using var provider = Services(Limits(database.ConnectionString));
+        // The paper scheduler holds the venue key over one public candle read, longer than the lock timeout.
+        await using var holder = new NpgsqlConnection(database.ConnectionString);
+        await holder.OpenAsync();
+        await using (var hold = new NpgsqlCommand("SELECT pg_advisory_lock(hashtextextended('vessel-venue-budget:hyperliquid',0))", holder))
+            await hold.ExecuteScalarAsync();
+        var owner = Guid.NewGuid();
+        async Task<bool> AdmitAsync()
+        {
+            await using var scope = provider.GetRequiredService<IOwnerScopeFactory>().Create(owner);
+            var store = scope.Services.GetRequiredService<IMonitorStore>();
+            return await scope.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(
+                () => store.ReadCapacityAsync("hyperliquid", DateTimeOffset.UtcNow, default), default);
+        }
+        // The first admission takes the owner key and waits for the venue key; the second waits for the owner key.
+        var first = AdmitAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(300));
+        var second = AdmitAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(1500));
+        Assert.False(second.IsCompleted, second.IsFaulted ? second.Exception!.GetBaseException().Message : "The second admission did not wait.");
+        await using (var unlock = new NpgsqlCommand("SELECT pg_advisory_unlock(hashtextextended('vessel-venue-budget:hyperliquid',0))", holder))
+            await unlock.ExecuteScalarAsync();
+        Assert.True(await first);
+        Assert.True(await second);
+    }
+
+    /// <summary>
+    /// With one connection per pool, a unit that holds the journal pool's only connection still reads owner status and
+    /// venue deadlines (the directory pool), and the paper scheduler's lock session, which borrows from both pools while it
+    /// holds its own connection, completes a tick. A nested borrow from the pool it holds would wait for the pool's timeout.
+    /// </summary>
+    [PostgresFact]
+    public async Task Nested_borrows_complete_when_every_pool_has_one_connection()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var schema = new IdentitySchema("identity_pool_" + Guid.NewGuid().ToString("N"));
+        var identityOptions = new DbContextOptionsBuilder<IdentityDbContext>();
+        IdentityDbContext.Configure(identityOptions, database.ConnectionString, schema);
+        await using (var identity = new IdentityDbContext(identityOptions.Options, schema))
+        {
+            await identity.Database.MigrateAsync();
+            identity.Users.Add(new IdentityUser { Id = owner, DisplayName = "Synthetic owner", CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
+            await identity.SaveChangesAsync();
+        }
+        var tiny = new NpgsqlConnectionStringBuilder(database.ConnectionString) { Pooling = true, MaxPoolSize = 1, Timeout = 3 }.ConnectionString;
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Vessel"] = tiny,
+            ["Vessel:Auth:OwnerId"] = owner.ToString(),
+            ["Vessel:Identity:Schema"] = schema.Name,
+            ["Vessel:Identity:Origins:0"] = "https://vessel.test",
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IHostEnvironment>(new HostingEnvironment { EnvironmentName = Environments.Development });
+        services.AddScoped<IJournalOwnerContext, AssignedOwnerContext>();
+        services.AddVesselPersistence(configuration);
+        services.AddPaperTrading();
+        services.AddVesselIdentityDirectory(configuration);
+        await using var provider = services.BuildServiceProvider();
+
+        await using (var scope = provider.GetRequiredService<IOwnerScopeFactory>().Create(owner))
+        {
+            var db = scope.Services.GetRequiredService<VesselDbContext>();
+            var (status, deadline) = await scope.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+            {
+                // The unit's transaction now holds the journal pool's only connection, as a monitor claim does.
+                await db.Database.ExecuteSqlRawAsync("SELECT 1");
+                return (await provider.GetRequiredService<IJournalOwnerDirectory>().StatusAsync(owner, default),
+                    await provider.GetRequiredService<IServerStateStore>().VenueRetryAtAsync("hyperliquid", default));
+            }, default);
+            Assert.Equal((JournalOwnerStatus.Active, (DateTimeOffset?)null), (status, deadline));
+        }
+
+        using var scheduler = ActivatorUtilities.CreateInstance<PaperScheduler>(provider, new PaperWorkerOptions());
+        await scheduler.TickAsync(default).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [PostgresFact]
     public async Task A_request_blocked_on_a_lock_answers_503_with_a_message_the_browser_can_show()
     {
         await using var database = await CoreDatabase.CreateAsync();
@@ -161,6 +250,54 @@ public sealed class DatabaseLimitsTests
         await using (var unlock = new NpgsqlCommand($"SELECT pg_advisory_unlock(hashtextextended('vessel-management:{owner}',0))", holder))
             await unlock.ExecuteScalarAsync();
         Assert.True((await client.PostAsJsonAsync("/api/portfolios", new { name = "Unblocked" })).IsSuccessStatusCode);
+    }
+
+    // A session check that hits the lock or the statement timeout is the database being busy: the same 503 and Retry-After
+    // as other requests. EF reports the lock timeout wrapped as a transient failure; the statement timeout arrives as the
+    // provider's own exception, which session authentication used to turn into "identity unavailable" without Retry-After.
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_session_check_that_hits_a_limit_answers_the_same_busy_503(bool statement)
+    {
+        await using var identity = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var owner = (await identity.SeedAsync(key)).User.Id;
+        var settings = identity.ConfigurationValues(owner);
+        settings["Vessel:Database:LockTimeout"] = "00:00:01";
+        settings["Vessel:Database:StatementTimeout"] = "00:00:02";
+        await using var factory = new CoreApiFactory(owner, connection: identity.Connection, settings: settings, testAuthentication: false,
+            configure: services => services.AddSingleton<TimeProvider>(identity.Clock));
+        using var client = IdentityHttpTest.Client(factory);
+        await IdentityHttpTest.SignInAsync(client, key);
+        // The next check refreshes the session's last-seen time.
+        identity.Clock.Now = identity.Clock.Now.AddMinutes(6);
+        var sessions = $"\"{identity.Schema.Name}\".sessions";
+        await using var holder = new NpgsqlConnection(identity.Connection);
+        await holder.OpenAsync();
+        await using var transaction = await holder.BeginTransactionAsync();
+        // Either the refresh runs longer than the statement timeout, or another transaction holds the session row.
+        await using (var hold = new NpgsqlCommand(statement
+            ? $"""
+              CREATE FUNCTION "{identity.Schema.Name}".slow_refresh() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(5); RETURN NEW; END $$;
+              CREATE TRIGGER slow_refresh BEFORE UPDATE ON {sessions} FOR EACH ROW EXECUTE FUNCTION "{identity.Schema.Name}".slow_refresh();
+              """
+            : $"SELECT 1 FROM {sessions} FOR UPDATE", holder, transaction))
+            await hold.ExecuteNonQueryAsync();
+        if (statement) await transaction.CommitAsync();
+        var clock = Stopwatch.StartNew();
+        using var response = await client.GetAsync("/api/auth/session");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"The request took {clock.Elapsed}.");
+        Assert.Equal(DatabaseBusy.Message, (await response.Content.ReadFromJsonAsync<ProblemDetails>())!.Detail);
+        Assert.Equal("1", response.Headers.RetryAfter?.ToString());
+        if (statement)
+        {
+            await using var drop = new NpgsqlCommand($"DROP TRIGGER slow_refresh ON {sessions}", holder);
+            await drop.ExecuteNonQueryAsync();
+        }
+        else await transaction.RollbackAsync();
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
     }
 
     [Theory]

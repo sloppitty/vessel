@@ -29,12 +29,19 @@ public static class DependencyInjection
     {
         services.TryAddScoped<OwnerScopeAssignment>();
         services.TryAddSingleton<IOwnerScopeFactory, OwnerScopeFactory>();
-        services.TryAddSingleton(_ =>
+        NpgsqlDataSource Create(bool pooled)
         {
             var connection = config.GetConnectionString("Vessel");
             if (string.IsNullOrWhiteSpace(connection)) throw new MissingDatabaseConfigurationException();
-            return limits is null ? NpgsqlDataSource.Create(connection) : limits.Create(connection);
-        });
+            var builder = new NpgsqlDataSourceBuilder(connection);
+            limits?.Apply(builder.ConnectionStringBuilder);
+            if (!pooled) builder.ConnectionStringBuilder.Pooling = false;
+            return builder.Build();
+        }
+        // See DatabasePools for the order in which these may nest.
+        services.TryAddSingleton(_ => Create(pooled: true));
+        services.TryAddKeyedSingleton(DatabasePools.Journal, (_, _) => Create(pooled: true));
+        services.TryAddKeyedSingleton(DatabasePools.Dedicated, (_, _) => Create(pooled: false));
         services.TryAddSingleton<IJournalOwnerInventory, JournalOwnerInventory>();
         // Every worker registers persistence, including deployments that do not run the monitor module.
         var deployments = config.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
@@ -43,11 +50,10 @@ public static class DependencyInjection
         services.TryAddSingleton<Vessel.Application.Monitoring.IServerStateStore, ServerStateStore>();
         services.TryAddSingleton<Vessel.Application.Monitoring.ISystemMonitorStore, SystemMonitorStore>();
         // Resolve only when persistence is consumed. Metadata and liveness do not open a database.
-        // One pool per process: the context borrows the registered data source instead of building its own from the
-        // connection string, so EF, the raw-SQL stores and the identity contexts share one set of connections.
+        // The context borrows the registered journal pool, never one built from the connection string.
         services.AddDbContext<VesselDbContext>((provider, options) =>
         {
-            options.UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>()).ConfigureWarnings(warnings => warnings.Log(
+            options.UseNpgsql(provider.GetRequiredKeyedService<NpgsqlDataSource>(DatabasePools.Journal)).ConfigureWarnings(warnings => warnings.Log(
                 // These Error events embed exception text, the database name and host:port.
                 // The API records request failures with a safe event, so keep them at Debug.
                 (RelationalEventId.ConnectionError, LogLevel.Debug),

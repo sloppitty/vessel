@@ -23,22 +23,27 @@ public sealed class IdentityCleanup(IDbContextFactory<IdentityDbContext> factory
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 
+    /// <summary>Rows per delete. Each batch is its own short transaction, so sign-in waits for one batch, never the sweep.</summary>
+    public int BatchSize { get; init; } = 1000;
+
     public async Task CleanAsync(CancellationToken ct)
     {
-        await new IdentityTransaction(factory).RunAsync(async db =>
-        {
-            // A retention sweep is long on purpose: no statement limit for the rest of this transaction.
-            await db.Database.ExecuteSqlRawAsync("SET LOCAL statement_timeout = 0", ct);
-            var now = clock.GetUtcNow();
-            // Preserve the full verification skew; cleanup must not shorten a challenge's accepted lifetime.
-            await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);
-            await db.Registrations.Where(x => x.ExpiresAt < now).ExecuteDeleteAsync(ct);
-            // Finished and expired pairings linger a day after their last deadline; unfinished ones are never cut short.
-            await db.Pairings.Where(x => x.ExpiresAt < now.AddDays(-1)).ExecuteDeleteAsync(ct);
-            var cutoff = now.AddDays(-30);
-            await db.Sessions.Where(x => x.RevokedAt < cutoff ||
-                x.IdleExpiresAt < cutoff || x.AbsoluteExpiresAt < cutoff).ExecuteDeleteAsync(ct);
-            return true;
-        }, ct);
+        var now = clock.GetUtcNow();
+        // Preserve the full verification skew; cleanup must not shorten a challenge's accepted lifetime.
+        await DeleteAsync(db => db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).OrderBy(x => x.Id), ct);
+        await DeleteAsync(db => db.Registrations.Where(x => x.ExpiresAt < now).OrderBy(x => x.Id), ct);
+        // Finished and expired pairings linger a day after their last deadline; unfinished ones are never cut short.
+        await DeleteAsync(db => db.Pairings.Where(x => x.ExpiresAt < now.AddDays(-1)).OrderBy(x => x.Id), ct);
+        var cutoff = now.AddDays(-30);
+        await DeleteAsync(db => db.Sessions.Where(x => x.RevokedAt < cutoff ||
+            x.IdleExpiresAt < cutoff || x.AbsoluteExpiresAt < cutoff).OrderBy(x => x.Id), ct);
+    }
+
+    // The identity write lock is taken and released per batch (issue #106), so a long sweep never holds it past the lock timeout.
+    private async Task DeleteAsync<T>(Func<IdentityDbContext, IQueryable<T>> expired, CancellationToken ct)
+    {
+        int deleted;
+        do deleted = await new IdentityTransaction(factory).RunAsync(db => expired(db).Take(BatchSize).ExecuteDeleteAsync(ct), ct);
+        while (deleted >= BatchSize);
     }
 }
