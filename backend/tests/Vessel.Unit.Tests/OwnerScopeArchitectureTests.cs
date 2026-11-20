@@ -37,6 +37,9 @@ public sealed class OwnerScopeArchitectureTests
             // Revision-only read: exact assigned owner parameter inside a repeatable-read snapshot; absent means revision zero. One
             // statement keys the Activity cache, records the facts' revision and fences the funding evidence (Phase 2, item 9b).
             "Vessel.Persistence/ActivityStore.cs|08a1101a79e200d777d5e4522b439ba98b623fbb041a53711f81903b421df984",
+            // Issue #107: the same row's facts and execution revisions for the exact assigned owner parameter, inside the cache
+            // reader's repeatable-read snapshot; an absent row reads both as zero.
+            "Vessel.Persistence/ActivityStore.cs|afdb817bb704ceedd3cd9a7edd70502741a83e177c4806fefad3f27b9dda4ccf",
             "Vessel.Api/EvidenceCopyCommand.cs|c9b34ee7f02a2f083c971b5bcfd2b6dfb239af4970d91d8e56dc616d55a3d9c4",
             // Offline evidence copy: read-only transaction mode for its metadata read; touches no rows.
             "Vessel.Api/EvidenceCopyCommand.cs|6c20e5345ee8028f61cc0541aeb60699e5cffa99c8f79ff7f8c62b0a8dad1837",
