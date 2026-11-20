@@ -141,7 +141,7 @@ public sealed class PlayServiceTests
     public async Task Drawings_live_in_their_own_row_and_the_version_check_covers_them()
     {
         var drawings = JsonSerializer.SerializeToElement(new Dictionary<string, object[]> { ["hyperliquid:BTC"] = [new { id = "d1" }] });
-        var play = await service.CreateAsync(new CreatePlayRequest(venue.Id, "BTC", "venue", "Breakout", TestPlays.Plan(), drawings), default);
+        var play = await service.CreateAsync(new CreatePlayRequest(venue.Id, "BTC", "venue", "Breakout", TestPlays.Plan(), drawings), TradingMode.Real, default);
         var row = Assert.Single(store.Drawings);
         Assert.Equal((owner, play.Summary.Id), (row.OwnerId, row.PlayId));
         Assert.Equal("d1", play.Drawings.GetProperty("hyperliquid:BTC")[0].GetProperty("id").GetString());

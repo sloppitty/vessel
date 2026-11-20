@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
@@ -38,7 +39,7 @@ public sealed class PlayDrawingsPostgresTests
         foreach (var owner in new[] { first, second })
         {
             await using var db = database.Context(owner);
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
             db.Accounts.Add(account);
             foreach (var document in documents)
             {
@@ -47,7 +48,7 @@ public sealed class PlayDrawingsPostgresTests
                 plays.Add((play.Id, owner, document));
             }
             // A paper Play is a Play too.
-            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
+            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
             var paper = PaperPlayTestsValues.PaperAccount(owner, portfolio.Id);
             db.AddRange(portfolio, paper, PaperLedgerEntry.Seed(owner, paper.Id, 4000, DateTimeOffset.UtcNow));
             var simulated = TestPlays.Create(paper, new PerpetualInstrument("hyperliquid", "BTC"));
@@ -115,7 +116,7 @@ public sealed class PlayDrawingsPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
         using var client = factory.AuthorizedClient();
@@ -159,7 +160,7 @@ public sealed class PlayDrawingsPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
         var account = PaperPlayTestsValues.PaperAccount(owner, portfolio.Id);
         await using (var seed = database.Context(owner))
         {
@@ -189,7 +190,7 @@ public sealed class PlayDrawingsPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
         await using (var db = database.Context(owner))
         {
