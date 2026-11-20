@@ -5,8 +5,11 @@ description: Prepare and deliver a Vessel release - version bump, changelog and 
 
 # Vessel release
 
-Read `AGENTS.md`, `CHANGELOG.md`, `deploy/README.md` and the Release images
-section of `docs/development.md` first.
+Read only what the release needs: the `## Unreleased` section and the previous
+release section of `CHANGELOG.md`, the subjects since the previous tag
+(`git log --first-parent --oneline <previous tag>..origin/main`), and the newest
+"From vA to vB" section of `deploy/README.md` you extend. Open other documents
+only for a change that needs them.
 
 ## Release destination and scope
 
@@ -34,6 +37,9 @@ section of `docs/development.md` first.
 2. Read changes since the preceding release tag. Move `## Unreleased` items
    into a dated `## X.Y.Z - <Month D, YYYY>` changelog section with migration
    names, upgrade requirements and known limits. Preserve historical entries.
+   Name every pull request merged since the previous tag as `#N`, in the entry
+   for its change or in a closing `Pull requests: #N, …` line for those that
+   changed nothing owner-facing. The release pull request itself is exempt.
 3. Write `docs/releases/vX.Y.Z.md`: owner-facing highlights, upgrade steps,
    image tags and known limits. It becomes the GitHub Release body, so link
    repository files with absolute `https://github.com/<owner>/<repo>/blob/vX.Y.Z/...`
@@ -56,8 +62,9 @@ section of `docs/development.md` first.
      `docs/development.md`
 
    `python3 scripts/release.py check --tag vX.Y.Z` checks the packaged files,
-   the changelog section, the notes and the upgrade manifest; the docs examples
-   are yours to check.
+   the current-release docs examples, the changelog section, the notes and the
+   upgrade manifest, and refuses a changelog that misses a pull request merged
+   since the previous tag.
 6. Do not change dependencies, regenerate lockfiles unnecessarily or expand
    product scope. Use the root-pinned pnpm through Corepack if needed.
 
@@ -84,6 +91,12 @@ both storage verifications before publication. Manual Release reruns must select
 a release tag; branch dispatches skip all jobs without allocating a runner.
 The owner merges it.
 
+Freeze `main` from release preparation until the tag: ask the owner not to
+merge anything else. If a pull request merges anyway, add it to the changelog
+and notes in a follow-up release pull request before tagging. The pre-push hook
+and the Release workflow run `release.py check --tag`, which refuses the tag
+while the changelog misses it.
+
 ## Tag and publish
 
 After the merge, tag the merge commit on `main` and push only that tag:
@@ -94,7 +107,10 @@ git tag -a "v$VERSION" -m "Vessel v$VERSION" origin/main
 git push origin "v$VERSION"
 ```
 
-Do not use force or `--tags`. The Release workflow then:
+Do not use force or `--tags`. `scripts/agent_guard.py` refuses a tag push and
+any publication unless the owner started this session with
+`VESSEL_AGENT_RELEASE=1`; without it, give the owner the two commands above
+and continue once the tag is pushed. The Release workflow then:
 
 1. rejects lightweight tags, tags not on `main` and version/notes mismatches;
 2. runs the foundation checks, and builds both images once from the tagged
@@ -146,8 +162,13 @@ environments or Docker credential configuration.
     Leave the published versioned tags as they are and report to the owner; the
     usual way forward is a new patch release. Never delete or move a published
     tag to work around it.
-- If a correction is needed after a tag was pushed, report it and obtain the
-  owner's direction rather than moving the tag.
+- If the tag run fails, never move, delete or re-push the tag. Read the failed
+  job's log. A transient failure (runner, network, registry) gets "Re-run
+  failed jobs" on the same run. A failure in the source or the release files
+  (a check, a verification, a version mismatch) is fixed forward: fix it on
+  `main` through a pull request, then release the next patch version
+  `vX.Y.(Z+1)` with its own changelog section and notes saying `vX.Y.Z` was
+  tagged but not published. Report the failed tag and run to the owner.
 
 ## Manual fallback
 
