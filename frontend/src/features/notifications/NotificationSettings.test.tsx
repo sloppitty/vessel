@@ -65,6 +65,20 @@ describe('Notification settings', () => {
     expect(api.notificationPreferences).toHaveBeenCalledTimes(2)
   })
 
+  // #115: Retry used to leave the old load error on screen until the new read answered.
+  it('drops the load error while Retry reads', async () => {
+    let answer!: (value: typeof notificationPreferencesFixture) => void
+    const api = { notificationPreferences: vi.fn().mockRejectedValueOnce(new Error('down'))
+      .mockImplementationOnce(() => new Promise(resolve => { answer = resolve })) } as unknown as WorkspaceApi
+    show(api)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Notification preferences could not be loaded.')
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading notification preferences…')
+    await act(async () => answer(notificationPreferencesFixture))
+    expect(await screen.findByText('Delivering')).toBeInTheDocument()
+  })
+
   it('rereads after a feed reset unless edits are pending', async () => {
     const api = { notificationPreferences: vi.fn().mockResolvedValue(notificationPreferencesFixture) } as unknown as WorkspaceApi
     const { inApp, emit } = hub()
