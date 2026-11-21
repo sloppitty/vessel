@@ -1,6 +1,6 @@
 # Messaging, events and workers
 
-October 18, 2026. Developer and operator reference for the implemented event, messaging, worker and monitor design. It describes what the code does and how to work with it. The owner's decisions and their reasons are in the [monitor plan](play-monitor-plan.md); the browser API is in the [monitor API contract](play-monitor-api-contract.md); deployment commands are in [`deploy/README.md`](../../deploy/README.md). A diagram overview is in [play-monitor-overview.html](play-monitor-overview.html). Update this document with the code.
+October 18, 2026; transport replaced November 20, 2026 (issue #99). Developer and operator reference for the implemented event, messaging, worker and monitor design. It describes what the code does and how to work with it. The owner's decisions and their reasons are in the [monitor plan](play-monitor-plan.md); the browser API is in the [monitor API contract](play-monitor-api-contract.md); deployment commands are in [`deploy/README.md`](../../deploy/README.md). A diagram overview is in [play-monitor-overview.html](play-monitor-overview.html). Update this document with the code.
 
 ## Contents
 
@@ -8,7 +8,7 @@ October 18, 2026. Developer and operator reference for the implemented event, me
 - [Projects and dependencies](#projects-and-dependencies)
 - [Unit of work](#unit-of-work)
 - [Event model](#event-model)
-- [Topology](#topology)
+- [Transport](#transport)
 - [Subscriptions](#subscriptions)
 - [Modules](#modules)
 - [Worker host](#worker-host)
@@ -22,11 +22,11 @@ October 18, 2026. Developer and operator reference for the implemented event, me
 ## Overview and principles
 
 - **PostgreSQL is the record.** Events, each subscription's progress and receipts, pending monitor requests, leases and discrepancies live in PostgreSQL. Everything can be rebuilt from it.
-- **RabbitMQ is transport.** It wakes subscribers and carries commands. Losing its volume costs latency, not data; subscribers catch up from PostgreSQL and pending monitor requests are found again in `monitor_accounts`. Dead-letter contents and broker diagnostics are not reconstructed.
-- **Publishers never know subscribers.** An event is written once in the business transaction and published once to the topic, with the event type as routing key. No per-subscriber rows, no consumer list, no producer republish.
-- **Each subscriber owns its subscription:** queue, filter, dead-letter queue, receipts, retries and recovery.
-- **Domain and Application are free of Wolverine and RabbitMQ.** All broker code is in `Vessel.Messaging`; `ArchitectureTests` enforces it.
-- **Nothing is created at runtime.** The API and workers never migrate, create envelope storage or declare broker topology. The one-shot `migrate` step does, explicitly.
+- **PostgreSQL is the transport too (issue #99).** A `pg_notify` staged in the appending transaction wakes the listening workers, and only if the commit succeeds. A notification is a hint: losing it, or the listening connection, costs latency, not data; subscribers catch up from PostgreSQL and pending monitor requests are found again in `monitor_accounts`. There is no broker; RabbitMQ and Wolverine were removed in 0.4.3.
+- **Publishers never know subscribers.** An event is written once in the business transaction and notified once, with its owner, ID and type. No per-subscriber rows, no consumer list, no producer republish.
+- **Each subscriber owns its subscription:** filter, receipts, retries and recovery.
+- **Domain and Application are free of the transport.** The `pg_notify` outbox is in Persistence and the listening host code in `Vessel.Messaging`; `ArchitectureTests` enforces the project references and that no project references a broker package.
+- **Nothing is created at runtime.** The API and workers never migrate or register subscriptions. The one-shot `migrate` step does, explicitly.
 - **Events come from Vessel's own state changes** inside the unit of work, never from re-read venue rows. A price touch is never a fill. Discrepancies are flagged, never corrected.
 - **Owner scope everywhere.** Every message carries `ownerId`; hosts validate Active/Suspended/Unknown through `IJournalOwnerDirectory` and create an assigned `IOwnerScopeFactory` scope. Owners are the identity users. A message never mutates an HTTP scope.
 
@@ -34,16 +34,14 @@ October 18, 2026. Developer and operator reference for the implemented event, me
 flowchart LR
     Browser["Browser<br/>REST + SSE"] --> Web["web (nginx)"]
     Web --> Api["api<br/>Vessel.Api"]
-    Api -->|"unit of work: change + event + envelope"| Pg[("PostgreSQL<br/>the record")]
-    Api -->|"publish after commit"| Rmq{{"RabbitMQ<br/>transport"}}
-    Rmq -->|"vessel.commands.monitor"| Worker["worker<br/>Vessel.Worker, monitor module"]
-    Worker -->|"read and write"| Pg
-    Worker -->|"publish after commit"| Rmq
+    Api -->|"unit of work: change + event + pg_notify"| Pg[("PostgreSQL<br/>the record and the wake-ups")]
+    Pg -->|"LISTEN vessel.commands.monitor"| Worker["worker<br/>Vessel.Worker, monitor module"]
+    Worker -->|"read and write, pg_notify in the unit"| Pg
+    Pg -->|"LISTEN vessel.events"| Hub["worker-notifications<br/>notifications module"]
     Worker -->|"read-only checks, outside DB locks"| Venues["Venues<br/>Hyperliquid, Lighter, RISEx"]
     Api -->|"account Refresh"| Venues
     Api -->|"SSE reads committed events"| Pg
     Migrate["migrate (one-shot)<br/>identity + journal bundles,<br/>ensure-owner, then provision-messaging"] --> Pg
-    Migrate --> Rmq
 ```
 
 ## Projects and dependencies
@@ -61,7 +59,7 @@ flowchart TD
     Worker --> Infrastructure
     Worker --> Messaging
     Worker --> Persistence
-    Messaging["Vessel.Messaging<br/>Wolverine, RabbitMQ, modules"] --> Application
+    Messaging["Vessel.Messaging<br/>LISTEN host, modules"] --> Application
     Messaging --> Persistence
     Persistence["Vessel.Persistence<br/>EF, UnitOfWork, event store, receipts"] --> Application
     Persistence --> Domain
@@ -69,15 +67,15 @@ flowchart TD
     Application["Vessel.Application<br/>use cases, ports"] --> Domain["Vessel.Domain<br/>entities, DiscrepancyLifecycle"]
 ```
 
-Arrows point to what a project references. `backend/tests/Vessel.Unit.Tests/ArchitectureTests.cs` checks these exact references, that Domain and Application have no package references, and that no project except Messaging references a `WolverineFx*` or `RabbitMQ*` package.
+Arrows point to what a project references. `backend/tests/Vessel.Unit.Tests/ArchitectureTests.cs` checks these exact references, that Domain and Application have no package references, and that no project references a `WolverineFx*` or `RabbitMQ*` package.
 
 | Project | Messaging and monitor parts |
 |---|---|
 | `Vessel.Domain` | `Monitoring/MonitorAccount` (admission, leases, state and `StateRevision`), `MonitorExitWatch`, `PlayDiscrepancy`, `DiscrepancyLifecycle` |
 | `Vessel.Application` | Ports: `IUnitOfWork`, `IUnitOfWorkParticipant`, `IVesselEventSink`, `IVesselEventReader`, `IMonitorCommandSink`, `IVesselEventSubscriber`, `IVesselCommandHandler<T>`. Contracts: `VesselEvent`, `VesselEventDraft`, `VesselEventCursor`, `VesselEventValues.Types`, `MonitorAccountCommand`. Use cases: `MonitorCoordinator`, `MonitorDiscrepancyService`, `MonitorCommandHandler`, `MonitorOptions`; `Venues/OrderMechanics` |
-| `Vessel.Persistence` | `UnitOfWork`; `Events/`: `VesselEventStore` (sink, cursor, dedup), `VesselEventMutationCapture`, `VesselEventHistory` (reader), `EventRetention`, `EventStreamEpoch`, `IVesselEventOutbox`; `Events/Subscriptions/`: `EventSubscription`, `EventSubscriptionLimits`, `TopicFilter`, `EventDispatcher`, `EventCatchUp`, `EventSubscriptionRegistry`, `EventReceiptAdmin`; `MonitorStore`, `MonitorDiscrepancyStore`, `OwnerScopeFactory`, `ServerStateStore`, `SystemMonitorStore`, `SystemEventSubscriptionStore` (registered by `AddVesselPersistence`) |
+| `Vessel.Persistence` | `UnitOfWork`; `Events/`: `VesselEventStore` (sink, cursor, dedup), `VesselEventMutationCapture`, `VesselEventHistory` (reader), `EventRetention`, `EventStreamEpoch`, `IVesselEventOutbox`, `VesselNotifications` (channels, payloads and the `pg_notify` outbox); `Events/Subscriptions/`: `EventSubscription`, `EventSubscriptionLimits`, `TopicFilter`, `EventDispatcher`, `EventCatchUp`, `EventSubscriptionRegistry`, `EventReceiptAdmin`; `MonitorStore`, `MonitorDiscrepancyStore`, `OwnerScopeFactory`, `ServerStateStore`, `SystemMonitorStore`, `SystemEventSubscriptionStore` (registered by `AddVesselPersistence`) |
 | `Vessel.Infrastructure` | `ApplicationServices.AddVesselMonitoring` (monitor use cases and `Vessel:Monitor`, shared by the API and the monitor worker), `Monitoring/MonitorRunExecutor` (lease renewal through fresh scopes), `MonitorRunLog` |
-| `Vessel.Messaging` | `MessagingSettings`, `MessagingHosting` (`AddVesselMessaging`), `MessagingTopology`, `MessagingProvisioning`, `MessagingCommands` (offline CLI), `MessagingDeployments`, `EventSubscriptionListener`, `SubscriptionMaintenanceService`, `WolverineVesselEventOutbox`; `Modules/`: `IVesselModule`, `VesselModuleRegistry`, `Monitor/`, `Notifications/`, `Verification/` |
+| `Vessel.Messaging` | `MessagingSettings`, `MessagingHosting` (`AddVesselMessaging`), `PostgresNotificationListener`, `EventSubscriptionListener`, `MessagingProvisioning`, `MessagingCommands` (offline CLI), `SubscriptionMaintenanceService`; `Modules/`: `IVesselModule`, `INotificationHandler`, `VesselModuleRegistry`, `Monitor/`, `Notifications/`, `Verification/` |
 | `Vessel.Identity` | `IdentityOwnerDirectory`, cookie-session principal validity and offline administration; its own context/schema, no journal-table access |
 | `Vessel.Worker` | `WorkerHost`, `WorkerSettings`, `WorkerModules`, `MonitorScheduler`, `MonitorWakeup`, `NotificationHeartbeat`, `NotificationRetentionService` |
 | `Vessel.Api` | `AddVesselMessaging("api")`, offline command dispatch, `VesselEventEndpoints`, `MonitorEndpoints` |
@@ -94,15 +92,15 @@ Subscription definitions (`EventSubscription`) live in Persistence because the d
 - **Failures poison the unit.** Once a participant throws, the unit rolls back even if a caller catches the exception. Do not wrap participating calls in catch-and-continue blocks; only non-participating work (a venue HTTP read) can be handled and recorded, and then a new unit records it.
 - **Commit.** After the operation, the final save and every participant's `BeforeCommitAsync`, the commit runs with `CancellationToken.None`: cancellation is honoured up to the commit, never halfway through it.
 - **Rollback.** A rollback failure never replaces the original exception; it is attached under the exception data key `Vessel.UnitOfWork.RollbackError` and the scope becomes unusable.
-- **Events and envelopes are staged before commit, published after it.** `VesselEventStore` is a participant: `BeforeCommitAsync` sequences and inserts events and stages their outbox envelopes on the same transaction; `AfterCommitAsync` flushes the outbox. A flush failure after a successful commit is logged and left to Wolverine's durable outbox and subscriber catch-up; the operation still succeeded. `RollbackAsync` discards every buffered event and command. Never call Wolverine's `SaveChangesAndFlushMessagesAsync` or flush before the outer commit.
+- **Events and their notifications are staged before commit and delivered with it.** `VesselEventStore` is a participant: `BeforeCommitAsync` sequences and inserts events and stages a `pg_notify` for each (and for each monitor command) on the same transaction, through `IVesselEventOutbox`. PostgreSQL delivers the notifications only when that transaction commits, and drops them with a rollback or a savepoint rollback. Nothing is sent after commit; `AfterCommitAsync` only resets the buffers. `RollbackAsync` discards every buffered event and command.
 - **No object I/O inside a transaction.** `IUnitOfWork.IsActive` is true while a unit runs in the scope (including a dispatcher savepoint) and for any EF, explicitly enlisted or ambient `System.Transactions` transaction. Evidence upload, deletion and Play deletion call `RequireOutermost` and refuse before touching storage, because a rollback cannot undo it. The same applies to any network call.
 - **`IsolateAsync` is the dispatcher's savepoint.** `UnitOfWork.IsolateAsync` (internal) runs a subscription handler and saves its effects in a savepoint. On failure it rolls back to the savepoint, clears tracked entities and every participant's buffered state, and keeps the unit and its row locks, so the dispatcher can record the attempt in the same transaction. Call it before any other buffered participant write in the unit, since that state is discarded too. Only the dispatcher uses it.
 
 ## Event model
 
-### Envelope
+### Event payload
 
-`VesselEvent` (`backend/src/Vessel.Application/Events/VesselEventContracts.cs`) is the one payload for storage, broker and API. Serialization (`VesselEventJson`, and the same policy in Wolverine) uses web casing and writes every absent optional value as an explicit `null`.
+`VesselEvent` (`backend/src/Vessel.Application/Events/VesselEventContracts.cs`) is the one payload for storage and API. Serialization (`VesselEventJson`) uses web casing and writes every absent optional value as an explicit `null`. A notification never carries it: the dispatcher reads the stored event.
 
 | Field | Meaning |
 |---|---|
@@ -144,28 +142,29 @@ Field-level payloads and the decision history are in the [plan's event contract]
 
 - Producers call `IVesselEventSink.AppendAsync(VesselEventDraft)` inside an active unit; `SetRunAsync(runId, "owner" | "monitor")` sets the run identity for the unit's events. Link, fill and status mutations are captured automatically by `VesselEventMutationCapture`, an EF interceptor; producers do not append those.
 - **Causal order.** At `BeforeCommitAsync` the store orders captured link changes, then the fills they claim, then the status changes they caused, then explicit drafts (discrepancies, monitor and credential events).
-- **Sequence allocation.** The store locks the owner's `event_cursors` row (`FOR UPDATE`, held to commit), inserts `event_dedup` first (`ON CONFLICT DO NOTHING`; a duplicate key creates nothing), increments the cursor and inserts the `events` row with its sequence, then stages the envelope. No database sequence object is used, so a sequence below the committed cursor can never appear later. Sequences can have holes (account deletion, pruning), never late arrivals.
+- **Sequence allocation.** The store locks the owner's `event_cursors` row (`FOR UPDATE`, held to commit), inserts `event_dedup` first (`ON CONFLICT DO NOTHING`; a duplicate key creates nothing), increments the cursor and inserts the `events` row with its sequence, then stages its notification. No database sequence object is used, so a sequence below the committed cursor can never appear later. Sequences can have holes (account deletion, pruning), never late arrivals.
 - **Durable identities.** `event_dedup` (key → event ID, subject account), `event_baselines` (per-account watch start) and `event_fills` (known fill identities) survive retention, so a pruned event cannot be re-created. Deleting an account removes its baselines, fill identities, events, dedup rows and their receipts.
 
 ### Cursor and epoch
 
 `event_cursors` holds, per owner, `sequence` (last allocated), `retention_floor` (highest pruned sequence) and `epoch` (random UUID). The browser cursor is `{epoch}.{sequence}` with the epoch as 32 lowercase hex digits (`VesselEventCursor`), or `0` for the start of a stream not yet seen. A cursor from another epoch, below the floor, ahead of the database, or a bare pre-epoch sequence gets `resetRequired: true` and the head as `nextCursor`. `rotate-event-epoch` gives every owner a new epoch after a restore; `migrate` never rotates it.
 
-## Topology
+## Transport
 
-Names come from `MessagingTopology` with `Vessel:Messaging:Prefix` (default `vessel`):
+`VesselNotifications` (Persistence) names the channels and payloads; the default `IVesselEventOutbox`, `PostgresNotificationOutbox`, stages them with `SELECT pg_notify(...)` on the unit's own transaction:
 
-| Name | What |
-|---|---|
-| `vessel.events` | Durable topic exchange; routing key = event type |
-| `vessel.events.sub.<subscription>` | Durable quorum queue per subscription, bound to the exchange once per filter |
-| `vessel.commands.<queue>` | Durable quorum command queue owned by a module, for example `vessel.commands.monitor` |
-| `<queue>.dlx` | Durable fanout dead-letter exchange of each queue above |
-| `<queue>.dlq` | Durable quorum queue bound to that exchange |
+| Channel | Payload | Staged by | Listened by |
+|---|---|---|---|
+| `vessel.events:<schema>` | `<ownerId> <eventId> <type>` (UUIDs as `D`) | every appended event | every host that runs a subscription |
+| `vessel.commands.monitor:<schema>` | `MonitorAccountCommand` as JSON | `IMonitorCommandSink.EnqueueAsync` (API Check) | hosts that run the `monitor` module |
 
-Every subscription and command queue is declared with `x-queue-type: quorum`, `x-delivery-limit: Vessel:Messaging:DeliveryLimit` (default 20) and `x-dead-letter-exchange: <queue>.dlx`. The delivery limit is only a transport guard; business retries are counted in receipts. Hosts configure Wolverine's view of each queue with the same arguments and native dead-lettering into the same exchange.
+`<schema>` is `current_schema()` of the connection, and the whole name is cut to PostgreSQL's 63-character identifier limit. Journals in separate schemas of one database (tests, or two installations) never wake each other. Publisher and listener must therefore use the same connection string. A payload is at most a few hundred bytes, far below PostgreSQL's 8,000-byte limit.
 
-Only the explicit `provision-messaging` command declares topology, for every compiled-in module, whichever modules a deployment runs. RabbitMQ refuses to redeclare an existing queue with different arguments, so changing `DeliveryLimit` or a queue type needs the queue deleted first. Hosts never declare anything: Wolverine's request/reply queues are disabled (`DisableSystemRequestReplyQueueDeclaration`) and so is Wolverine's own dead-letter queueing. Publisher confirmations are enabled on every channel.
+`PostgresNotificationListener`, a hosted service registered by `AddVesselMessaging` only when the host runs a subscription or consumes a command (never the API), opens **one dedicated, unpooled connection** (application name `vessel-listen-<deployment>`), resolves each channel name in SQL, `LISTEN`s, and then waits for notifications. Each channel has a bounded in-memory queue (10,000 payloads) and one consumer, so payloads of one channel are handled one at a time and in order; a full queue drops the wake-up with a warning, and catch-up covers it. An idle connection is checked with `SELECT 1` every 15 seconds. When the connection fails, the listener logs one warning with the exception type, waits 1 second (doubling to 30 seconds, reset after a successful `LISTEN`) and connects again; nothing it missed is lost, because catch-up and the scheduler read PostgreSQL.
+
+`LISTEN/NOTIFY` does not pass through a transaction-pooling proxy such as PgBouncer in `transaction` mode: the listener's session would not keep its `LISTEN`. Behind one, delivery degrades to catch-up. The Compose deployment connects directly.
+
+Nothing is provisioned for the transport. `provision-messaging` only registers subscriptions (below).
 
 ## Subscriptions
 
@@ -175,17 +174,16 @@ Only the explicit `provision-messaging` command declares topology, for every com
 flowchart LR
     subgraph Unit["Publisher unit of work (API or worker)"]
         Change[Business change] --> Event["events row<br/>event_dedup, cursor"]
-        Event --> Envelope[Wolverine outbox envelope]
+        Event --> Notify["pg_notify<br/>vessel.events"]
     end
-    Envelope -->|"flush after commit"| Topic{{"vessel.events<br/>topic exchange"}}
-    Topic -->|"binding = filter"| Queue["vessel.events.sub.name<br/>quorum queue"]
-    Queue --> Listener["EventSubscriptionListener<br/>inline, no inbox"]
+    Notify -->|"delivered with the commit"| Listen["PostgresNotificationListener<br/>one connection per host"]
+    Listen --> Listener["EventSubscriptionListener<br/>filter match, owner check"]
     Listener --> Dispatcher["EventDispatcher<br/>one transaction"]
     CatchUp["EventCatchUp<br/>every 30 s"] --> Dispatcher
     Event -.->|"discovery from PostgreSQL"| CatchUp
     Dispatcher --> Receipts[("event_receipts")]
     Dispatcher --> Handler["IVesselEventSubscriber<br/>database-only effects"]
-    Listener -->|"terminal, invalid owner, unknown"| Dlq["name.dlx then name.dlq<br/>diagnostic only"]
+    Listener -->|"terminal, invalid owner, unknown"| Log["Warning log by IDs<br/>diagnostic only"]
 ```
 
 ### Registration
@@ -193,8 +191,8 @@ flowchart LR
 - `EventSubscription(name, module, filters, limits?)`: the name is 1–48 characters (lowercase letter first; lowercase letters, digits, `-`); filters are 1–32 AMQP topic patterns over event types (words split on `.`, `*` one word, `#` zero or more); the owning module must equal the declaring module.
 - `event_subscription_registrations` is the server-wide, insert-only subscription name/module/filter/fingerprint authority. Provisioning inserts a **new** registration and existing owners' initial progress in one statement (their current cursor is the responsibility start). Re-provisioning never backfills existing registrations or changes start/progress. Different module/fingerprint fails provisioning; changed filters need a new name.
 - `event_subscriptions` remains per-owner progress/low-water/gaps and references the server registration; receipts remain per owner/event/subscription. Dispatch/catch-up, not a publisher, initialize missing progress under the owner's shared retention lock and registration `FOR KEY SHARE`. Start responsibility at zero, low-water at the retained floor; a positive floor records an explicit lagging gap. A missing row never means NotResponsible. Registration/fingerprint is rechecked for retry/failure/advance, so removed/incompatible subscriptions produce no effects.
-- Deregistration is server-wide: lock/delete registration, cascade progress/receipts, then remove the queue. Stale catch-up cannot recreate progress without registration. New users need no producer-side subscriber list or provisioning run.
-- Provisioning registers before declaring bindings, so a rejected filter never reaches the broker. The dispatcher also refuses to settle for a host whose compiled filter differs from the registered fingerprint.
+- Deregistration is server-wide: lock/delete registration, cascade progress/receipts. Stale catch-up cannot recreate progress without registration. New users need no producer-side subscriber list or provisioning run.
+- The dispatcher refuses to settle for a host whose compiled filter differs from the registered fingerprint.
 
 ### Dispatcher
 
@@ -230,20 +228,22 @@ Receipts are removed with their event by retention (cascade) and with their subs
 
 ### Settlement
 
-Listeners run inline (`ProcessInline`), not through Wolverine's durable inbox: the delivery is acknowledged only after the dispatcher has settled or recorded the attempt. The durable outbox stays.
+Live delivery (`EventSubscriptionListener`) reads the notification's owner, event ID and type, skips subscriptions whose filter does not match the type, checks the owner's directory status once, and runs the dispatcher for each matching subscription in a fresh owner scope. Nothing is acknowledged: the receipt, or its absence, is the record.
 
-| Dispatch outcome | Receipt | Broker delivery |
+| Dispatch outcome | Receipt | Live delivery |
 |---|---|---|
-| `Delivered`, `Skipped`, `Expired` | Settled with any effects, same transaction | Ack |
-| `RetryScheduled` | Effects rolled back to the savepoint; `pending`, attempts + 1, `next_attempt_at` | Ack; catch-up owns the retry |
-| `Failed` | `failed` with a safe error | Dead-letter, for diagnosis |
-| `InvalidOwner` (also checked by the listener before dispatch) | None | Dead-letter, logged by IDs |
-| `Unknown` | None | Dead-letter, logged by IDs |
-| Queue not run by this host | None | Dead-letter |
-| `Historical`, `AlreadySettled`, `NotResponsible`, `NotDue`, `Busy` | Unchanged | Ack |
-| Dispatcher threw (database unavailable, shutdown) | Whatever committed | Ack; catch-up finds it later |
+| `Delivered`, `Skipped`, `Expired` | Settled with any effects, same transaction | Done |
+| `RetryScheduled` | Effects rolled back to the savepoint; `pending`, attempts + 1, `next_attempt_at` | Done; catch-up owns the retry |
+| `Failed` | `failed` with a safe error | Warning log by IDs and outcome |
+| `InvalidOwner` (also checked by the listener before dispatch) | None | Warning log by IDs |
+| `Unknown` | None | Warning log by IDs |
+| `Historical`, `AlreadySettled`, `NotResponsible`, `NotDue`, `Busy` | Unchanged | Done |
+| Dispatcher threw (database unavailable, shutdown) | Whatever committed | Warning log by type; catch-up finds it later |
+| Unreadable notification | None | Warning log; catch-up covers the event |
 
-Suspended owners' live events are acknowledged without handling or a receipt; catch-up resumes after restore. Unknown owners dead-letter. Directory failures enter the listener's safe acknowledge/catch-up path. Commands have no receipts: `MonitorCommandListener` validates IDs and directory status (suspended drops/logs, unknown dead-letters), then `MonitorCommandHandler` wakes the scheduler if `monitor_accounts` holds the matching pending request. Duplicates and late commands are acknowledged and do nothing.
+Every host that runs the subscription hears every notification, replicas included. They serialize on the receipt row lock (live delivery waits for it), and all but the first answer `AlreadySettled`. `DispatchResult.DeadLetter` keeps its name and now only selects the outcomes that are logged.
+
+Suspended owners' live events are skipped without handling or a receipt; catch-up resumes after restore. Unknown owners are logged and dropped. Directory failures are logged and left to catch-up. Commands have no receipts: `MonitorCommandListener` validates the payload, IDs and directory status (suspended and unknown owners are logged and dropped), then `MonitorCommandHandler` wakes the scheduler if `monitor_accounts` holds the matching pending request. Duplicates and late commands do nothing.
 
 ### Retries and catch-up
 
@@ -255,15 +255,11 @@ Each `EventCatchUp.RunAsync` pass for one subscription:
 2. **Retry work:** up to `BatchSize` due `pending` receipts at any sequence above the floor, including admin retries behind the low-water mark.
 3. **Advance:** under the subscription row lock, move the low-water mark monotonically to just before the first matching event without a terminal receipt, at most 10,000 sequences per pass and never past the committed cursor. Non-matching events, terminal receipts and holes count as settled. A lagging subscription whose mark reaches the floor becomes `active` again; its recorded gap stays.
 
-One event that cannot be dispatched does not stop the pass. Catch-up covers a lost broker or queue, an unroutable publish, an acknowledged-for-retry delivery, a dead-lettered message and a subscriber that was down.
+One event that cannot be dispatched does not stop the pass. Catch-up covers a lost notification, a listening connection that was down or reconnecting, a delivery left for retry, a logged terminal outcome and a subscriber that was down. With the defaults, an event no listener heard is delivered between 30 and 60 seconds after it was detected (the discovery grace, then the next pass).
 
 ### Admin retry
 
 `retry-event-receipts <name> (--owner <guid> | --all-owners) [--limit 1-1000] [--attempts n]` (defaults 100 and 3; `n` from 1 to the subscription's `MaxAdminRetryBudget`) returns up to `limit` retained `failed` receipts above the floor to `pending` with `max_attempts = attempts + n` and `next_attempt_at = now`. Exactly one owner-selection flag is required. With `--all-owners`, `--limit` applies per owner, not to the command's total. Attempt history is kept and the low-water mark is not rewound; catch-up in the hosting worker picks them up. It takes the retention lock shared, like dispatch. It works only for subscriptions compiled into the registry of the command's configuration.
-
-### Dead-letter queues
-
-Dead-letter queues are diagnostic copies. Receipts control retries; redriving a dead-lettered message never reopens a terminal receipt (the dispatcher answers `AlreadySettled`, or dead-letters an invalid owner or unknown event again). Purging a dead-letter queue loses no work.
 
 ### Retention
 
@@ -281,6 +277,8 @@ In effect, age decides: a slow subscription never extends retention beyond the w
 - Subscriptions are unordered; arrival order is not sequence order.
 - An external send followed by a crash can repeat; restoring an older database can lose receipts of work already sent. A future external notification provider must tolerate duplicates.
 - Subscription lag, gaps and failed receipts are not yet exposed through an API or health check; inspect them with SQL (see [runbook](#inspect-subscriptions-receipts-and-monitor-rows)).
+- Live delivery needs a direct (or session-pooled) PostgreSQL connection; behind a transaction-pooling proxy it falls back to catch-up.
+- `pg_notify` takes a database-wide lock at commit for notifying transactions. At Vessel's write rates (a few events per check) this is not measurable.
 
 ## Modules
 
@@ -289,28 +287,28 @@ In effect, age decides: a slow subscription never extends retention beyond the w
 ```csharp
 public interface IVesselModule
 {
-    string Name { get; }                                  // also the default deployment and envelope schema
-    IReadOnlyList<CommandQueue> Commands { get; }         // queues {prefix}.commands.{Name} this module owns
+    string Name { get; }                                  // also the default deployment
+    IReadOnlyList<CommandQueue> Commands { get; }         // channels commands.{Name} this module consumes
     IReadOnlyList<EventSubscription> Subscriptions { get; }
     void AddRunningServices(IServiceCollection services, IConfiguration configuration);
 }
-public sealed record CommandQueue(string Name, Type MessageType, Type? Handler = null);
+public sealed record CommandQueue(string Name, Type MessageType, Type? Handler = null);   // Handler: an INotificationHandler
 ```
 
-Every messaging host applies a module's publishing side: a durable-outbox route for each of its command types, except the command queues it consumes. Only a host that runs the module calls `AddRunningServices` and listens on its subscription and command queues. Wolverine models a RabbitMQ queue as one endpoint with one mode for both directions, so a consumer listens inline and never publishes there (its `WolverineVesselEventOutbox` refuses the command); otherwise Wolverine logs "Conflicting endpoint mode" and keeps whichever request it applied last. Requests come from the API. `VesselModuleRegistry.From` is the explicit list of compiled-in modules: `MonitorModule` (command queue `monitor`, no subscription), `NotificationsModule` (subscription `notifications`, filter `#`, the Notification Hub; see [Notification Hub](#notification-hub)) and, only with `Vessel:Messaging:Verification=true`, `VerificationModule` (subscription `verification`, filter `#`, a no-op handler whose receipts are the evidence). There is no plugin discovery. The registry refuses invalid or duplicate module names, the name `api`, duplicate subscription names, a subscription owned by another module, and duplicate command queue names or message types.
+Any host can stage a module's commands through the outbox. Only a host that runs the module calls `AddRunningServices` and listens on its channels: `events` when it runs a subscription, `commands.{Name}` for each command it consumes. `VesselModuleRegistry.From` is the explicit list of compiled-in modules: `MonitorModule` (command `monitor`, no subscription), `NotificationsModule` (subscription `notifications`, filter `#`, the Notification Hub; see [Notification Hub](#notification-hub)) and, only with `Vessel:Messaging:Verification=true`, `VerificationModule` (subscription `verification`, filter `#`, a no-op handler whose receipts are the evidence). There is no plugin discovery. The registry refuses invalid or duplicate module names, the name `api`, duplicate subscription names, a subscription owned by another module, and duplicate command names or message types.
 
 ### Add an event subscription
 
 1. **Choose the owner and name.** The subscription belongs to a module (existing or new). Its name and filters are permanent; a later filter change means a new name. Use the narrowest filters, for example `["play.*", "discrepancy.*"]`.
 2. **Write the handler** implementing `IVesselEventSubscriber`:
-   - database-only effects, idempotent on `message.Id`; it runs inside the dispatcher's unit, so no HTTP, broker or object-storage calls (`RequireOutermost` refuses the latter);
+   - database-only effects, idempotent on `message.Id`; it runs inside the dispatcher's unit, so no HTTP or object-storage calls (`RequireOutermost` refuses the latter);
    - return `EventHandling.Delivered`, or `Skipped` when the event no longer applies (for example superseded or no longer relevant);
    - throw `TerminalEventException` (safe, server-authored text, cut to 200 characters) for a permanent failure; any other exception is retried;
    - for external work, write durable work rows (and an outbox message) in the same transaction and send from elsewhere, never while holding the receipt lock.
-3. **Declare it** in the module: `Subscriptions => [new("name", ModuleName, ["play.*"])]`, with an `EventSubscriptionLimits` override only if needed, and register the handler in `AddRunningServices`: `services.AddKeyedScoped<IVesselEventSubscriber, Handler>("name")`. The listener (`EventSubscriptionListener`) and catch-up come with the host. A host that runs a subscription without its keyed handler fails at start (`EventSubscriberGuard`): a missing handler is a configuration error, never settled as a poison event.
-4. **Provision before starting** the hosting worker: run `migrate` (or `provision-messaging`). The queue, bindings, `.dlx`/`.dlq` and registration are created; the registration starts at the current sequence.
+3. **Declare it** in the module: `Subscriptions => [new("name", ModuleName, ["play.*"])]`, with an `EventSubscriptionLimits` override only if needed, and register the handler in `AddRunningServices`: `services.AddKeyedScoped<IVesselEventSubscriber, Handler>("name")`. Live delivery (`EventSubscriptionListener` behind the host's listening connection) and catch-up come with the host. A host that runs a subscription without its keyed handler fails at start (`EventSubscriberGuard`): a missing handler is a configuration error, never settled as a poison event.
+4. **Provision before starting** the hosting worker: run `migrate` (or `provision-messaging`). The registration is created and starts at the current sequence.
 5. **Run it** in a worker whose `Vessel:Worker:Modules` includes the module.
-6. **Tests:** a handler unit test; a PostgreSQL test through `EventDispatcher` and `EventCatchUp` covering delivered, skipped, retried and terminal outcomes and idempotent redelivery (see `EventSubscriptionTests`); a registration test if the filter matters; optionally a broker test in the `VesselEventTransportTests` style.
+6. **Tests:** a handler unit test; a PostgreSQL test through `EventDispatcher` and `EventCatchUp` covering delivered, skipped, retried and terminal outcomes and idempotent redelivery (see `EventSubscriptionTests`); a registration test if the filter matters; optionally a live-delivery test in the `VesselEventTransportTests` style.
 7. **Document** the subscription, its filter and its effects here.
 
 ### Add a worker module and deployment
@@ -318,11 +316,11 @@ Every messaging host applies a module's publishing side: a durable-outbox route 
 Example: the `notifications` module (`NotificationsModule`), which follows these steps.
 
 1. **Module class** in `backend/src/Vessel.Messaging/Modules/Notifications/NotificationsModule.cs` implementing `IVesselModule`, with `Name = "notifications"` (1–48 characters, lowercase letter first, letters, digits and `-`; not `api`).
-2. **Commands.** Each `CommandQueue(name, messageType, listenerType)` gets `vessel.commands.<name>`. Write the listener like `MonitorCommandListener`: check required IDs and `IJournalOwnerDirectory.StatusAsync(command.OwnerId)`: Active gets an owner scope, Suspended drops/logs by ID, Unknown dead-letters with `CommandDeadLetterException`, then resolve an Application `IVesselCommandHandler<T>`. Keep the durable work in PostgreSQL; the command is a hand-off. Publishing a new command type also needs a staging path: `IVesselEventOutbox` (Persistence) currently stages only `VesselEvent` and `MonitorAccountCommand`, so add an overload there, in `WolverineVesselEventOutbox` and in provisioning's `NoPublication`, plus an Application sink port like `IMonitorCommandSink`.
+2. **Commands.** Each `CommandQueue(name, messageType, handlerType)` gets the channel `vessel.commands.<name>:<schema>`. Write the handler like `MonitorCommandListener`, an `INotificationHandler`: parse the payload, check required IDs and `IJournalOwnerDirectory.StatusAsync(command.OwnerId)`: Active gets an owner scope, Suspended and Unknown are logged by ID and dropped, then resolve an Application `IVesselCommandHandler<T>`. Keep the durable work in PostgreSQL; the command is a hand-off. Publishing a new command type also needs a staging path: `IVesselEventOutbox` (Persistence) currently stages only `VesselEvent` and `MonitorAccountCommand`, so add an overload there, in `PostgresNotificationOutbox` (with its channel in `VesselNotifications`) and in provisioning's `NoPublication`, plus an Application sink port like `IMonitorCommandSink`.
 3. **Subscriptions** as in the previous section.
 4. **Services.** Handlers and scoped services in `AddRunningServices`; worker-only hosted services (schedulers, senders) as a new `case` in `WorkerModules.AddHostedServices` (`backend/src/Vessel.Worker/Program.cs`).
 5. **Registry.** Add the module to `VesselModuleRegistry.From`.
-6. **Schema.** Business tables come from an EF migration in `Vessel.Persistence`, applied only by `migrate`. Envelope storage comes from provisioning: with `Vessel:Messaging:Deployments` unset, provisioning prepares `api` plus one deployment per compiled-in module (`wolverine_notifications`). If the operator sets `Deployments`, add `Vessel__Messaging__Deployments__notifications__0=notifications` to `migrate`. `messaging_deployments` is insert-only: never change an existing deployment's module set; drain it and use a new deployment name and schema.
+6. **Schema.** Business tables come from an EF migration in `Vessel.Persistence`, applied only by `migrate`. Nothing else is provisioned per deployment. If the operator sets `Vessel:Messaging:Deployments` (heartbeat health), add the new deployment there on the API and workers.
 7. **Compose service**, same image:
 
    ```yaml
@@ -333,7 +331,7 @@ Example: the `notifications` module (`NotificationsModule`), which follows these
          DOTNET_ENVIRONMENT: Production
          Vessel__Worker__Modules__0: notifications
          Vessel__Worker__Deployment: notifications
-         # the worker service's ConnectionStrings__Vessel, Vessel__Auth__OwnerId and Vessel__Messaging__RabbitMqUri
+         # the worker service's ConnectionStrings__Vessel and identity settings
        depends_on:
          migrate:
            condition: service_completed_successfully
@@ -342,8 +340,8 @@ Example: the `notifications` module (`NotificationsModule`), which follows these
        restart: unless-stopped
    ```
 
-   `/app/worker-health` chooses its heartbeat file by the first module: the notifications module's file for `notifications`, otherwise the monitor scheduler's. Another module must write its own heartbeat (an `IMaintenanceHeartbeat`, which `SubscriptionMaintenanceService` calls after each pass in which every catch-up succeeded) and extend the script, or disable the healthcheck as the release check's `verifier` does. Mount the credential key ring only if the module decrypts venue tokens. The least-privilege broker user's permissions already cover `vessel.` names.
-8. **Tests:** registry consistency; a `WorkerHostTests`-style startup test (unknown module, schema provisioned for another module set); an unknown-owner command dead-letter test plus active/suspended-owner cases; subscription tests; `docker compose config` for the new service; release verification if the service ships.
+   `/app/worker-health` chooses its heartbeat file by the first module: the notifications module's file for `notifications`, otherwise the monitor scheduler's. Another module must write its own heartbeat (an `IMaintenanceHeartbeat`, which `SubscriptionMaintenanceService` calls after each pass in which every catch-up succeeded) and extend the script, or disable the healthcheck as the release check's `verifier` does. Mount the credential key ring only if the module decrypts venue tokens. The worker opens one more PostgreSQL connection to listen; size `max_connections` for it.
+8. **Tests:** registry consistency; a `WorkerHostTests`-style startup test (unknown module, the listening connection); an unknown-owner command test plus active/suspended-owner cases; subscription tests; `docker compose config` for the new service; release verification if the service ships.
 9. **Document** it in `deploy/README.md`, the Compose comments and here.
 
 ### Add an event type
@@ -359,27 +357,26 @@ Example: the `notifications` module (`NotificationsModule`), which follows these
 
 1. Reads the selected auth/identity directory configuration and `WorkerSettings` (`Vessel:Worker:Modules`, default `["monitor"]`; `Vessel:Worker:Deployment`, default the first module, never `api`).
 2. Resolves the modules from the registry; an unknown name stops startup.
-3. Registers Infrastructure, Identity directory, Persistence and each module's worker services, then `AddVesselMessaging(deployment, modules)` and `AddSubscriptionMaintenance()`. Directory selection is order-independent. Background work uses `IOwnerScopeFactory`; the worker no longer registers a fixed `WorkerOwnerContext`.
-4. At start, `MessagingDeploymentGuard` checks `messaging_deployments` before Wolverine starts: the deployment's schema (`wolverine_{deployment}` with `-` as `_`, or `Vessel:Messaging:StorageSchemas:{deployment}`) must be provisioned for exactly this deployment and sorted module set. Wolverine's service name is `vessel-{deployment}`; `AutoBuildMessageStorageOnStartup` is `None`.
+3. Registers Infrastructure, Identity directory, Persistence and each module's worker services, then `AddVesselMessaging(deployment, modules)` (with the listening connection) and `AddSubscriptionMaintenance()`. Directory selection is order-independent. Background work uses `IOwnerScopeFactory`; the worker no longer registers a fixed `WorkerOwnerContext`.
+4. At start, `EventSubscriberGuard` refuses a running subscription without its keyed handler. The listening connection starts in the background and never blocks start: with PostgreSQL away it retries with its backoff. Nothing else is checked: there is no per-deployment storage.
 5. Before the host starts, the entrypoint runs the schema check that API readiness uses (`SchemaCompatibility`): it refuses to start, prints `Vessel worker refused to start.` with the reason and exits with code 1 when the journal or identity schema has migrations the image does not know or lacks some of the image's migrations.
 6. A startup failure prints only the exception type name.
 7. `WorkerWatchdog`, registered last, stops the worker with exit code 3 when a module's loop makes no progress ([stale worker exit](#stale-worker-exit-issue-105)).
 
-Replicas of one deployment share its schema. Deployments with different module sets need different schemas.
+Replicas of one deployment each hold a listening connection and share its heartbeat.
 
 ```mermaid
 flowchart TB
     subgraph Image["One image: skorcius/vessel:api-x.y.z"]
-        ApiDep["api deployment<br/>Vessel.Api, no modules<br/>schema wolverine_api"]
-        MonDep["worker, deployment monitor<br/>Modules = monitor, N replicas<br/>schema wolverine_monitor"]
-        VerDep["verifier, deployment verification<br/>release checks only<br/>schema wolverine_verification"]
-        NotDep["worker-notifications<br/>Modules = notifications<br/>schema wolverine_notifications"]
+        ApiDep["api deployment<br/>Vessel.Api, no modules<br/>stages pg_notify, listens to nothing"]
+        MonDep["worker, deployment monitor<br/>Modules = monitor, N replicas<br/>LISTEN vessel.commands.monitor"]
+        VerDep["verifier, deployment verification<br/>release checks only<br/>LISTEN vessel.events"]
+        NotDep["worker-notifications<br/>Modules = notifications<br/>LISTEN vessel.events"]
     end
-    Migrate["migrate: provision-messaging"] -->|"insert-only rows"| Registry[("messaging_deployments<br/>schema, deployment, modules")]
-    ApiDep -.->|"startup check"| Registry
-    MonDep -.->|"startup check"| Registry
-    VerDep -.->|"startup check"| Registry
-    NotDep -.->|"startup check"| Registry
+    ApiDep -->|"pg_notify in the unit"| Pg[("PostgreSQL")]
+    Pg -.->|"one listening connection each"| MonDep
+    Pg -.-> VerDep
+    Pg -.-> NotDep
     MonDep --> Maint["Every worker host:<br/>catch-up for its subscriptions,<br/>hourly retention"]
     VerDep --> Maint
     NotDep --> Maint
@@ -405,7 +402,7 @@ flowchart TB
 
 ### Command listener
 
-`vessel.commands.monitor` carries `MonitorAccountCommand(RequestId, AccountId, OwnerId, Trigger)` (the plan's `RunAccountMonitor`). The API stages it in the same transaction that records the pending request in `monitor_accounts`. The listener validates the owner and IDs, wakes the scheduler for a matching pending request, and acknowledges. It never reads a venue. A lost command costs at most one 30-second tick.
+The channel `vessel.commands.monitor` carries `MonitorAccountCommand(RequestId, AccountId, OwnerId, Trigger)` (the plan's `RunAccountMonitor`) as JSON. The API stages the notification in the same transaction that records the pending request in `monitor_accounts`, so the durable request row is the command and the notification only wakes the worker. The listener validates the owner and IDs and wakes the scheduler for a matching pending request. It never reads a venue. A lost notification costs at most one 30-second tick.
 
 ### Maintenance
 
@@ -415,61 +412,30 @@ flowchart TB
 
 - After each productive pass the monitor scheduler writes `<unix seconds> <timeout seconds>` to `Vessel:Monitor:HeartbeatFile` (written to a temporary file, then moved) and upserts `server_monitor_heartbeats(deployment, seen_at)` through `IServerStateStore`. If either fails, it deletes the file and the pass fails.
 - `/app/worker-health` passes when the file is readable, has two numeric fields and its age is between 0 and the timeout it records.
-- The API reports `workerOnline` when a monitor deployment heartbeat is at most `Vessel:Monitor:HeartbeatTimeout` old. It filters deployments using its own module map, so a non-monitor worker cannot make monitor health green. API, worker and provisioning hosts must have identical `Vessel:Messaging:Deployments`.
+- The API reports `workerOnline` when a monitor deployment heartbeat is at most `Vessel:Monitor:HeartbeatTimeout` old. It filters deployments using its own module map, so a non-monitor worker cannot make monitor health green. API and worker hosts must have identical `Vessel:Messaging:Deployments`.
 - Logs carry IDs and exception type names, never payloads, venue messages or secrets.
 
 ### Stale worker exit (issue #105)
 
 The health check only marks a container unhealthy, and Compose never restarts an unhealthy container. So each worker also runs `WorkerWatchdog`: when one of its modules has made no progress for its limit, it logs `The {module} loop made no progress for … Stopping the worker with exit code 3 …` at Critical, stops the host and the process exits with code 3, so `restart: unless-stopped` starts a new one. A shutdown that does not finish within the host's shutdown timeout (30 s) plus 10 s ends the process with a fail-fast exit, also non-zero.
 
-- **Progress** is the moment a module writes its heartbeat (`WorkerProgress`): the monitor scheduler after a productive pass, the notifications maintenance after a productive catch-up pass, the paper scheduler after a tick. The paper scheduler also counts each finished candle read inside a tick, failed or not, because one tick reads one window after another. Before the first heartbeat, time counts from the watchdog's start, which comes after every other hosted service (the broker connection included) has started. Modules without a heartbeat (`verification`) are not watched.
+- **Progress** is the moment a module writes its heartbeat (`WorkerProgress`): the monitor scheduler after a productive pass, the notifications maintenance after a productive catch-up pass, the paper scheduler after a tick. The paper scheduler also counts each finished candle read inside a tick, failed or not, because one tick reads one window after another. Before the first heartbeat, time counts from the watchdog's start, which comes after every other hosted service has started. Modules without a heartbeat (`verification`) are not watched.
 - **Limit**: `Vessel:Worker:StaleExitAfter` (default `00:10:00`, 2 minutes to 2 hours), never less than the module's own heartbeat timeout, so the container is reported unhealthy first. The watchdog checks every 30 seconds, so the exit comes between the limit and the limit plus 30 seconds.
 - **Why 10 minutes.** A module's normal gap is 30 seconds: the monitor scheduler tick (`MonitorOptions.SchedulerTick`), the catch-up interval (`EventSubscriptionLimits.CatchUpInterval`) and the paper tick (`Vessel:Paper:SchedulerTickSeconds`). The longest legitimate wait inside one step is 20 seconds: a venue read at its whole-read deadline (`BoundedJsonHttp.Deadline`, the same as the venue `HttpClient` timeout), or a monitor claim waiting for the `vessel-venue-budget:{venue}` advisory lock, which the paper worker holds over at most one such read. The other waits do not block a loop: a venue at its machine-wide capacity or behind a venue deadline (at most 1 hour) is skipped for the tick, not waited for; monitor runs, backfill pages (five reads of 20 seconds) and funding reads run on leases outside the scheduler tick, which never awaits them; venue reads never run inside a transaction or lock (Refresh and Check read under a lease, credential verification outside the lock), so a database lock is held only by a short unit; the paper worker's per-Play cadence (60 minutes by default) only decides which Plays are due, and its tick still writes a heartbeat every 30 seconds. 10 minutes is 20 normal gaps and 30 back-to-back 20-second waits. The longest configurable heartbeat timeout is 10 minutes for monitor and notifications and 15 minutes for paper; the limit follows it when it is longer.
-- **Outages.** A module's heartbeat also stops when every owner's work fails, for example while PostgreSQL is unreachable. The worker then exits after the limit and restarts; at start it reads the schema, fails while the database is away, exits with code 1 and is restarted by Compose with its growing delay until the database returns. A broker outage after start does not stop the heartbeat (see [Without the broker](#without-the-broker-measured-november-17-2026)); a start without the broker blocks for about 95 seconds and exits with code 1, as before.
+- **Outages.** A module's heartbeat also stops when every owner's work fails, for example while PostgreSQL is unreachable. The worker then exits after the limit and restarts; at start it reads the schema, fails while the database is away, exits with code 1 and is restarted by Compose with its growing delay until the database returns. A lost listening connection does not stop the heartbeat: the listener reconnects on its own (see [Without a broker](#without-a-broker-issue-99)).
 
-### Without the broker (measured November 17, 2026)
+### Without a broker (issue #99)
 
-Issue #98 measured what the API and the monitor worker do when RabbitMQ is unreachable. Nothing was changed; whether a host should start without the broker is issue #99. The tests are opt-in like the other broker tests (`Vessel_TEST_EVENT_RABBIT`) and live in `MonitorBrokerOutageTests.cs` (class `MonitorEndToEndTests`):
-
-- **A**: `Worker_and_api_retry_an_unreachable_broker_for_about_95_seconds_then_fail_to_start`;
-- **B**: `Hosts_finish_starting_when_the_broker_returns_within_the_retry_window`;
-- **C**: `Checks_continue_while_the_broker_is_away_and_its_events_are_delivered_once_when_it_returns`.
-
-The worker and the API reach the broker through `BrokerProxy`, a loopback relay the test closes (connections refused, open connections reset) and reopens. Pinned WolverineFx 6.50.0, RabbitMQ 4.3.6.
-
-The Basis column says where each statement comes from: **asserted** (the named test fails if it is false), **observed** (printed in that test's output, not asserted), **read from code** (the named file), **manual** (the real broker stop below, run once, not repeatable from the repository) or **not measured**.
-
-**Real broker stop (manual, November 17, 2026).** To compare with the relay, test C was run once with a temporary, uncommitted variant of `BrokerProxy` that left the relay open and, at the outage and at the return, waited for a shell loop on the host to run `docker stop vessel-verify-rabbit-98` and then `docker start vessel-verify-rabbit-98` (a throwaway `rabbitmq:4.3.6-management` container with a test-only user on the test network, removed afterwards). Each switch waited until the broker's port refused or accepted connections. The test passed; the differences it printed are marked **manual** below. That variant is not in the repository.
+Issue #98 measured (November 17, 2026) that with RabbitMQ unreachable at start, neither the API nor the monitor worker started: each failed with `BrokerInitializationException` after about 95 seconds, and the account the scheduler had claimed kept its 5-minute lease. The owner decided on November 20, 2026 to remove the broker (issue #99). The hosts now need only PostgreSQL:
 
 | Question | Answer | Basis |
 |---|---|---|
-| Broker unreachable at start: does the API start? | No. Wolverine makes 20 connection attempts, then the host fails with `BrokerInitializationException`, for a host name that does not resolve. | Asserted (A, API) |
-| Does the API process end? | Yes: `Vessel.Api/Program.cs` does not catch the exception. Not run as a process. | Read from code (`Vessel.Api/Program.cs`) |
-| Does the monitor worker start? | No, the same way, for a port that refuses connections. | Asserted (A, worker) |
-| Does the worker process end? | Yes: its entrypoint prints `Vessel worker could not start (BrokerInitializationException)` and exits with code 1. Not run as a process. | Read from code (`Vessel.Worker/Program.cs`) |
-| How long does a start attempt block? | Between 60 s and 180 s. | Asserted (A) |
-| | About 95 s: 95.1 s to 95.4 s for each host over two runs. | Observed (A) |
-| Readiness while a host is starting | Unknown: `WebApplicationFactory` returns no client until the host has started, so no test requests `/health/ready` during the attempt. | Not measured |
-| Readiness once a host runs | `200` during an outage: readiness covers PostgreSQL, migrations and identity, not the broker. | Asserted (C) |
-| Do scheduled checks run during the start attempt? | Not usefully. The scheduler starts before Wolverine; its first pass claims the account, and the run fails with `InvalidOperationException` ("The Rabbit MQ sending connection has not been created") because it cannot stage its events. | Asserted (A, B) |
-| | The claim keeps its lease: after the broker returns, a scheduler tick does not run the account again; once the lease has expired, the next tick does. | Asserted (B) |
-| | The lease lasts 5 minutes. | Read from code (`MonitorOptions.Lease`) |
-| Are events appended to PostgreSQL? | No. The failed run rolls back with its events: `events` stays empty. | Asserted (A, B) |
-| Broker returns during the start attempt: does the host start? | Yes. Both hosts finish starting: the worker within 30 s of the return and the API within a further 30 s (the test waits for them one after the other, so 60 s is the asserted bound for both); after the lease expires the run succeeds and every event reaches the subscriber once. | Asserted (B) |
-| | About 5 s after the return (the next retry), in two runs. | Observed (B) |
-| Broker returns after the attempt failed | The process has exited. Compose restarts it (`restart: unless-stopped`), and each attempt blocks as above. | Not measured; restart policy read from code (`deploy/compose.yaml`) |
-| Broker goes away while the hosts run: do checks continue? | Yes. Scheduled runs succeed and the state stays `live`; their events commit in PostgreSQL and wait in the worker's `wolverine_outgoing_envelopes`. The API reports `workerOnline: true`. | Asserted (C) |
-| What happens to a manual Check? | `202 Accepted` with `manualState: pending`. The command waits in the API's outbox, the worker does not run it within 3 s, and the next scheduler tick runs the pending request. | Asserted (C) |
-| | The scheduler ticks every 30 s in production. | Read from code (`MonitorOptions.SchedulerTick`) |
-| What do the hosts log? | Wolverine logs at Error; nothing in a `Vessel` category logs at Warning or above. No message text or logged exception contains the broker password. | Asserted (C) |
-| | With connections reset: `Unexpected Rabbit MQ connection shutdown` and `Unexpected channel shutdown … Wolverine will attempt to restart`, then about one `Error trying to start a new Rabbit MQ channel` per sender per second, `Failed to send outgoing envelopes batch`, then `Sending agent for … is latched`. On return: `RabbitMQ connection is recovered successfully`. | Observed (C) |
-| | With a real broker stop: only the two channel shutdowns, at Warning, then the same Error lines and recovery. | Manual |
-| When the broker returns, does delivery resume? | Yes, without a restart. Both outboxes drain and every event appended meanwhile settles `delivered` with one attempt. | Asserted (C) |
-| | About 1.5 s after the relay reopened, in two runs. | Observed (C) |
-| | 3.2 s after the broker's port answered again. | Manual |
-| Does the worker's command listener resume? | Yes. After the return, a Check wakes the scheduler without a tick. | Asserted (C) |
-
-Gaps: whether the API's HTTP port accepts connections during the 95 s attempt, and Docker's restart loop, need the packaged stack. The in-process tests use `WebApplicationFactory`, which opens no socket. `scripts/verify-release.py` already stops RabbitMQ under running hosts and checks the outbox and the Notification Hub catch-up, but it never starts a host without the broker.
+| Do the API and the monitor worker start with only PostgreSQL? | Yes, at once: no broker setting exists. The API serves `/health/ready` 200, the first scheduled run succeeds and every event it appends reaches the subscriber once, live. | `MonitorEndToEndTests.Api_and_monitor_worker_start_with_only_postgresql_and_a_check_wakes_the_worker`, `WorkerHostTests.Monitor_worker_starts_with_only_postgresql_and_listens_on_its_own_connection` |
+| How fast is live delivery? | Append to settled receipt: under 2 s at the 95th percentile over 20 events, both in the integration test and in the packaged release check (measured in the database from `detected_at` to `settled_at`). Catch-up could not be this fast: its discovery grace is 30 s. | `VesselEventTransportTests.A_notification_wakes_live_delivery_well_before_catch_up_could`; `scripts/verify-release.py` (`delivery_latency`) |
+| A Check while no worker listens? | `202`; the pending request waits in `monitor_accounts` and the next scheduler tick runs it. | `MonitorEndToEndTests.A_lost_listening_connection_only_delays_a_check_to_the_next_tick_and_reconnects` |
+| The listening connection is killed? | The listener logs one warning by type, reconnects after 1 s and later Checks wake the worker again; an event appended meanwhile is delivered live after the reconnect or by catch-up. | `VesselEventTransportTests.A_killed_listening_connection_reconnects_and_live_delivery_resumes`, the same `MonitorEndToEndTests` test; `verify-release.py` and `e2e-full-stack.py` (step `8-listener`) |
+| An event nobody heard (no listener, stopped listener, stopped subscriber)? | Catch-up delivers it from PostgreSQL. | `VesselEventTransportTests.Catch_up_recovers_events_whose_notification_no_listener_received`; `verify-release.py` (stopped Notification Hub, verifier stopped across backup and restore) |
+| A notification for a rolled-back unit? | Never delivered: PostgreSQL drops it with the transaction. | `VesselEventTransportTests.Event_and_notification_commit_together_and_reach_a_verification_subscription_once`, `WorkerHostTests.A_monitor_request_notifies_the_worker_only_when_its_pending_row_commits` |
 
 ## Monitor
 
@@ -480,15 +446,13 @@ sequenceDiagram
     participant Browser
     participant Api as API
     participant Pg as PostgreSQL
-    participant Rmq as RabbitMQ
     participant Sch as MonitorScheduler
     participant Run as MonitorCoordinator
     participant Venue
     Browser->>Api: POST /api/accounts/{id}/monitor/run
-    Api->>Pg: lock account and monitor row, admit (manual), stage command
+    Api->>Pg: lock account and monitor row, admit (manual), pg_notify the command
     Api-->>Browser: 202 requestId and monitor (pending)
-    Api->>Rmq: MonitorAccountCommand after commit
-    Rmq->>Sch: listener validates owner, wakes scheduler
+    Pg->>Sch: notification on commit; listener validates owner, wakes scheduler
     Sch->>Pg: discover, ClaimDueAsync with SKIP LOCKED, lease generation
     Sch->>Run: RunAsync(lease), renewed every minute
     Run->>Pg: capture revisions, commit monitoring baseline
@@ -496,7 +460,7 @@ sequenceDiagram
     Run->>Venue: order read when the venue has Orders
     Run->>Pg: unit of work under account lock, check lease and revisions
     Note over Run,Pg: import, reconcile links and lifecycle, update watches, evaluate discrepancies, complete row, append events
-    Run->>Rmq: outbox flush after commit (events)
+    Run->>Pg: commit delivers the events' notifications
     Browser->>Api: SSE stream sees monitor.run-completed
 ```
 
@@ -766,17 +730,15 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 |---|---|---|
 | `ConnectionStrings:Vessel` | API, worker, offline commands | |
 | `Vessel:Auth:OwnerId` | API, worker, offline commands | Token fixed owner; Wallet legacy owner/user 1. Never substitute it for a message's directory-validated owner. |
-| `Vessel:Messaging:RabbitMqUri` | API, worker, `provision-messaging`, `deregister-event-subscription` | Absolute `amqp://` or `amqps://` URI. Compose builds it from `RABBITMQ_USER`/`RABBITMQ_PASSWORD` (`migrate`) or `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD` with fallback (API, worker) |
 
-### `Vessel:Messaging` (`MessagingSettings`)
+### `Vessel:Messaging`
 
 | Setting | Default | Allowed | Meaning |
 |---|---|---|---|
-| `Prefix` | `vessel` | 1–48 characters; lowercase letter first; lowercase letters, digits, `-`, `.` | Topology name prefix. The documented least-privilege permissions assume `vessel.` |
-| `DeliveryLimit` | `20` | 1–1000 | Quorum `x-delivery-limit` transport guard; must match the declared queues |
-| `StorageSchemas:{deployment}` | `wolverine_{deployment}` (`-` → `_`) | 1–63 characters; lowercase letter first; lowercase letters, digits, `_` | Explicit envelope schema; every deployment needs its own |
-| `Deployments:{name}:{i}` | `api` (no modules) and one deployment per compiled-in module | Valid names; `api` runs none; others at least one known module | Identical on API, workers and provisioning; also filters API monitor heartbeat health |
+| `Deployments:{name}:{i}` | one deployment per compiled-in module | Valid names | Read by the API and workers to filter monitor and notification heartbeat health; identical on every host |
 | `Verification` | `false` | `true`/`false` | Compiles in the `verification` subscription. Release checks and tests only |
+
+`RabbitMqUri`, `Prefix`, `DeliveryLimit` and `StorageSchemas` were removed with the broker (issue #99); a value left in configuration is ignored.
 
 ### `Vessel:Events` (`VesselEventSettings`)
 
@@ -824,7 +786,7 @@ The owner Refresh reads settled funding in resumable windows (Phase 2, item 9a),
 | Setting | Default | Allowed | Meaning |
 |---|---|---|---|
 | `Modules:{i}` | `["monitor"]` | Compiled-in module names | Modules this worker runs; an unknown name stops startup |
-| `Deployment` | First module | Valid name, not `api` | Logical deployment: envelope schema and Wolverine service name |
+| `Deployment` | First module | Valid name, not `api` | Logical deployment: heartbeat row and the listening connection's application name `vessel-listen-{deployment}` |
 | `StaleExitAfter` | `00:10:00` | 2 minutes–2 hours | A module without progress for this long (never less than its heartbeat timeout) stops the worker with exit code 3 ([stale worker exit](#stale-worker-exit-issue-105)) |
 
 ### `Vessel:Notifications` (`NotificationOptions`)
@@ -847,6 +809,7 @@ The API and the notifications worker validate the same section; `MonitorInterval
 |---|---|
 | Attempt cap 12; backoff 1 minute doubling to 1 hour, ±20%; discovery grace 30 s; catch-up every 30 s, batch 100; admin budget at most 12; supported version 1 | `EventSubscriptionLimits` (per-subscription override) |
 | Retention sweep hourly; 10,000-sequence floor decision and low-water advance windows | `SubscriptionMaintenanceService`, `EventRetention`, `EventCatchUp` |
+| Listening connection: idle check every 15 s, reconnect after 1 s doubling to 30 s, 10,000 queued payloads per channel | `PostgresNotificationListener` |
 | Scheduler tick 30 s; lease 5 minutes, renewed every minute; failure retries 1 and 3 minutes; superseded retry 1 minute; discovery page 500; two concurrent account reads per owner | `MonitorOptions`, `MonitorRunExecutor`, `MonitorCoordinator`, `MonitorStore` |
 | Confirmation at least 60 s later | `DiscrepancyLifecycle.ConfirmationDelay` |
 | Venue `Retry-After` default 60 s, at most 1 hour | `BoundedJsonHttp`, `VenueRateLimitException.MaxDelay` |
@@ -860,28 +823,28 @@ Commands assume the default Compose project in the operator directory; add every
 
 ### Offline commands
 
-The API binary runs them without starting a host; they read `ConnectionStrings__Vessel`, `Vessel__Auth__OwnerId` and `Vessel__Messaging__*` and print only Vessel's own messages.
+The API binary runs them without starting a host; they read `ConnectionStrings__Vessel`, `Vessel__Auth__OwnerId` and `Vessel__Messaging__Verification` and print only Vessel's own messages.
 Retain the full private `COMPOSE_FILE` list on offline commands too; all hosts
 need identical identity settings. The packaged migration preflight must not be bypassed for an upgrade.
 
 ```sh
 # EF migrations, then provisioning (the normal path):
 docker compose run --rm migrate
-# Provisioning only, with PostgreSQL and RabbitMQ already running:
+# Subscription registrations only, with PostgreSQL running:
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll provision-messaging
 # Mandatory after every database restore, before provisioning and before any host starts:
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll rotate-event-epoch
 # Return failed receipts to pending with a bounded extra budget:
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
   retry-event-receipts <name> --owner <guid> --limit 100 --attempts 3
-# Remove a subscription's registration, receipts, queue, .dlq and .dlx:
+# Remove a subscription's registration, progress and receipts:
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
   deregister-event-subscription <name>
 ```
 
 `/app/migrate` first validates auth mode/token/Wallet origin, then runs
 `/app/migrate-identity-ef`, `/app/migrate-ef`, `identity ensure-owner`, then
-`provision-messaging`: envelope storage and the `messaging_deployments` row of every configured deployment, then insert-only subscription registrations, then broker topology. It is idempotent. The `migrate` service uses the broker administrator. Exit code 2 prints the usage; 1 is a failure.
+`provision-messaging`: insert-only subscription registrations of every compiled-in module, nothing else. It is idempotent. Exit code 2 prints the usage; 1 is a failure. The command name and its place in `/app/migrate` are kept so operator scripts that call it keep working.
 
 ### Upgrade
 
@@ -897,23 +860,12 @@ API and both workers start; a failed migration blocks them. A worker stopped mid
 
 ### Backup
 
-Stop web, API and **both workers on every host/replica**, dump both PostgreSQL schemas together, archive the stopped object store, start again (commands in [deploy/README.md](../../deploy/README.md#backups)). The RabbitMQ volume is excluded: subscribers recover unsettled events from PostgreSQL. Keep the credential key ring separate.
+Stop web, API and **both workers on every host/replica**, dump both PostgreSQL schemas together, archive the stopped object store, start again (commands in [deploy/README.md](../../deploy/README.md#backups)). Keep the credential key ring separate.
 
 ### Restore
 
 Into fresh volumes: stop every host → restore PostgreSQL (both schemas, and objects) → Wallet `identity reset-after-restore`
-and trusted-record reconciliation → `rotate-event-epoch` → `migrate` → start. The rotation is what makes old browser cursors reset even after the restored stream reaches their sequence; skipping it lets a browser trust events from another history. RabbitMQ starts empty; envelopes still in the restored outbox are sent and catch-up redelivers unsettled events. Full steps: [deploy/README.md](../../deploy/README.md#isolated-restore).
-
-### Broker volume lost or broker replaced
-
-```sh
-docker compose stop api worker worker-notifications
-docker compose up -d --wait rabbitmq
-docker compose run --rm migrate
-docker compose up -d
-```
-
-Provisioning redeclares topology; registrations are unchanged. Outbox envelopes are published once the broker answers, catch-up redelivers within 30 s plus the discovery grace, and pending Checks are claimed from `monitor_accounts`. Dead-letter contents are gone; receipts are not. On an empty volume `RABBITMQ_USER`/`RABBITMQ_PASSWORD` create the administrator again; recreate the optional application user.
+and trusted-record reconciliation → `rotate-event-epoch` → `migrate` → start. The rotation is what makes old browser cursors reset even after the restored stream reaches their sequence; skipping it lets a browser trust events from another history. Catch-up delivers unsettled events. Full steps: [deploy/README.md](../../deploy/README.md#isolated-restore).
 
 ### Inspect subscriptions, receipts and monitor rows
 
@@ -927,21 +879,12 @@ docker compose exec -T postgres psql -U vessel -d vessel -c \
 docker compose exec -T postgres psql -U vessel -d vessel -c \
   "SELECT subscription, event_id, sequence, attempts, max_attempts, error FROM event_receipts WHERE state = 'failed' ORDER BY sequence LIMIT 20"
 docker compose exec -T postgres psql -U vessel -d vessel -c \
-  "SELECT schema_name, deployment, modules FROM messaging_deployments ORDER BY schema_name"
+  "SELECT application_name, state, backend_start FROM pg_stat_activity WHERE application_name LIKE 'vessel-listen-%'"
 docker compose exec -T postgres psql -U vessel -d vessel -c \
   'SELECT "AccountId", "State", "ManualState", "Trigger", "NextRunAtUtc", "ConsecutiveFailures", "Error" FROM monitor_accounts'
 ```
 
-`error` is safe server text. A `lagging` subscription with a gap missed those events permanently; decide whether its consumer needs a manual reconciliation.
-
-### Dead-letter queues
-
-```sh
-docker compose exec rabbitmq rabbitmqctl list_queues name type messages
-docker compose exec rabbitmq rabbitmqctl purge_queue vessel.events.sub.<name>.dlq
-```
-
-Look at messages through the management page (loopback, SSH tunnel) for diagnosis. Fix the cause, then use `retry-event-receipts` for `failed` receipts; redriving dead-lettered messages does not reopen them. Purging loses no work.
+`error` is safe server text. A `lagging` subscription with a gap missed those events permanently; decide whether its consumer needs a manual reconciliation. Each worker that runs a subscription or the monitor module shows one `vessel-listen-<deployment>` row per replica; a missing row means it is reconnecting (see its log).
 
 ### Retry failed receipts
 
@@ -952,7 +895,7 @@ Look at messages through the management page (loopback, SSH tunnel) for diagnosi
 ### Deregister a subscription
 
 1. Stop the deployment that hosts it and remove the subscription (or module) from the code or `Vessel:Worker:Modules`.
-2. Run `deregister-event-subscription <name>`. It deletes the registration and its receipts, then the queue, `.dlq` and `.dlx`; anything it held is released.
+2. Run `deregister-event-subscription <name>`. It deletes the registration, its progress and its receipts; anything it held is released.
 3. If it is still compiled in, the next provisioning registers it again from the current sequence, without history.
 
 ### Scale workers
@@ -961,36 +904,7 @@ Look at messages through the management page (loopback, SSH tunnel) for diagnosi
 docker compose up -d --scale worker=2
 ```
 
-Replicas of one deployment share its schema, claim accounts with `SKIP LOCKED` and run maintenance safely. The two-concurrent-reads budget per owner stays; extra replicas add availability. Never give another module set to an existing deployment name; add a separate service and deployment.
-
-### Rotate RabbitMQ credentials
-
-Rotate each broker user separately: change the password in RabbitMQ first, then the matching `.env` value, then recreate only the services that use that user. `rabbitmqctl` reads the new password from standard input, and the shell's `read -s` keeps it out of the terminal, shell history and process arguments. Compose reads `.env` itself; its values are not exported to your shell, so name the user explicitly.
-
-Administrator (`RABBITMQ_USER`, used by `migrate`, and by API and worker when no application user is configured):
-
-```sh
-read -rs NEW_PASSWORD   # a new URL-safe value, for example from: openssl rand -hex 24
-printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <administrator-user>
-unset NEW_PASSWORD
-# Edit RABBITMQ_PASSWORD in .env, then recreate what uses the administrator:
-docker compose up -d --force-recreate api worker   # only if RABBITMQ_APP_USER is not set
-docker compose run --rm migrate                    # confirms provisioning works with the new password
-```
-
-Application user (`RABBITMQ_APP_USER`, used by API and worker):
-
-```sh
-read -rs NEW_PASSWORD
-printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <application-user>
-unset NEW_PASSWORD
-# Edit RABBITMQ_APP_PASSWORD in .env, then:
-docker compose up -d --force-recreate api worker
-```
-
-Recreate every other service that uses the same user too, for example additional worker services. Between the broker change and the recreation, the running hosts keep their existing connections; a reconnect with the old password fails until they are recreated, and their outboxes hold publications meanwhile.
-
-`.env` values create users only on an empty volume. The optional least-privilege application user (configure, write and read on `^vessel\..*`, write also on `amq.default`) is described in [deploy/README.md](../../deploy/README.md#broker-users-and-passwords).
+Replicas of one deployment each listen on their own connection, claim accounts with `SKIP LOCKED` and run maintenance safely; a notification reaches every replica, and the receipt lock lets one of them settle it. The two-concurrent-reads budget per owner stays; extra replicas add availability. Give another module set its own deployment name and service, so its heartbeat stays separate.
 
 ### Monitor and health states
 
@@ -1002,15 +916,16 @@ Recreate every other service that uses the same user too, for example additional
 | Stop coverage "Current book not read" (live) | The venue's order reader does not return the current book (RISEx); order-book checks (missing, short, cancelled and excess stops, orphaned exits and entries, level drift) do not run there | Not a fault. Check stops at the venue itself |
 | `stale` | Three or more consecutive failures, or no success for twice the interval | Check worker logs (types and IDs), venue reachability and `server_venue_deadlines` deadlines |
 | `credential-error` | Read-only token missing, refused or expired; scheduling stops | Save a valid token; discovery reschedules the account |
-| Worker offline (`workerOnline: false`) | Heartbeat older than `HeartbeatTimeout` | `docker compose ps worker`, `docker compose logs --tail=100 worker`; check database and broker reachability and provisioning |
+| Worker offline (`workerOnline: false`) | Heartbeat older than `HeartbeatTimeout` | `docker compose ps worker`, `docker compose logs --tail=100 worker`; check database reachability and migrations |
 | Container unhealthy | Heartbeat file missing, malformed or too old | Same as offline |
 | Worker restarts with exit code 3 | A module made no progress for `Vessel:Worker:StaleExitAfter` ([stale worker exit](#stale-worker-exit-issue-105)) | Read the log lines before `made no progress`; check database reachability. Repeated exits mean the loop keeps stalling |
 | Worker exits at start with `refused to start` | The journal or identity schema is behind the image, or has migrations the image does not know (an older image on a newer schema) | Run `migrate`, or start the image that applied the newer migrations, or restore the pre-upgrade backup |
-| Worker exits at start | Unknown module, unprovisioned deployment or schema provisioned for another module set | Run `migrate`; fix `Vessel__Worker__Modules`/`Deployment`; use a new deployment name for a new module set |
+| Worker exits at start | Unknown module, or a subscription without its handler | Fix `Vessel__Worker__Modules`/`Deployment` |
+| Live delivery slow (about a minute) | The listening connection is down or behind a transaction-pooling proxy; catch-up delivers | Read the worker log for `The notification listener lost its PostgreSQL connection`; connect workers directly to PostgreSQL |
 | Discrepancy `unverifiable` | No decisive observation within the lifetime | Inspect the venue; dismiss with a note, or wait for a fresh decision |
 | Watch `unverifiable` | Leftover order not proven gone within `WatchLifetime` | Check the order at the venue; cancel it there if it still rests |
 
-`/health/ready` covers PostgreSQL and migrations only, not the broker, worker, venues or object storage.
+`/health/ready` covers PostgreSQL and migrations only, not the workers, venues or object storage.
 
 ## Testing map
 
@@ -1018,11 +933,11 @@ Run all backend suites with `pnpm test:backend` or `dotnet test backend/Vessel.s
 The messaging, worker, persistence and service-backed API tests live in
 `backend/tests/Vessel.Integration.Tests`, run separately with
 `pnpm test:integration`. Use disposable services only: `Vessel_TEST_POSTGRES`
-for PostgreSQL and `Vessel_TEST_EVENT_RABBIT` for RabbitMQ 4.3. Without them,
-service-gated tests skip; service-free infrastructure tests still run.
+for PostgreSQL, which live delivery needs too. Without it, service-gated tests
+skip; service-free infrastructure tests still run.
 S3 evidence tests use the explicit `VESSEL_TEST_S3_*` settings in
 `backend/README.md`. Release's reusable `.github/workflows/checks.yml` supplies
-PostgreSQL and RabbitMQ. Value-only rules, fake-backed use cases, venue adapters
+PostgreSQL. Value-only rules, fake-backed use cases, venue adapters
 and service-free HTTP hosts have their own Unit, UseCases, Venues and Api
 projects, with shared support in the non-test `Vessel.TestKit` library. Place
 mixed tests by their heaviest dependency in that order: external service,
@@ -1036,14 +951,14 @@ web host, real venue adapter, Application service with fakes, then pure rules.
 | Wire contract | `VesselEventGoldenTests` (real producers, explicit nulls, causal order) |
 | Subscriptions | `EventSubscriptionTests` (registration, dispatcher, retries, races, savepoint, admin retry, low-water mark, retention, maintenance, epoch rotation, account deletion, settings binding) |
 | Browser stream and API | `VesselEventStreamTests`, `VesselEventApiTests` |
-| Broker | `VesselEventTransportTests` (outbox, settlement table through inline listeners, unroutable publish and lost queue recovery, provisioning-only storage), `MonitorEndToEndTests` (scheduler without a browser, HTTP Check through the real broker; in `MonitorBrokerOutageTests.cs`, hosts with the broker unreachable at start, returning, and going away while they run, see [Without the broker](#without-the-broker-measured-november-17-2026)) |
+| Live delivery | `VesselEventTransportTests` (notification committed with the event and dropped with a rollback, settlement table through the listening connection, catch-up for unheard notifications, killed listening connection, p95 latency, insert-only provisioning), `MonitorEndToEndTests` (scheduler without a browser, HTTP Check woken through a notification; in `MonitorWithoutBrokerTests.cs`, hosts starting with only PostgreSQL and a lost listening connection, see [Without a broker](#without-a-broker-issue-99)) |
 | Worker host / multi-owner | `WorkerHostTests`, `MultiOwnerWorkerTests`, `MultiOwnerEventTests`, `MultiOwnerMessagingTests`, `MultiOwnerMonitorLimitsTests`, `OwnerScopeArchitectureTests`, `Isolation/BackgroundIsolationTests` (directory status, assigned scopes, cross-owner events/claims, shared budgets and deployment heartbeat) |
 | Monitor | `MonitorAccountTests`, `MonitorPostgresTests`, `MonitorCredentialRaceTests` |
 | Discrepancies | `DiscrepancyLifecycleTests` (table-driven state machine), `MonitorDiscrepancyTests`, `MonitorDiscrepancyReviewTests`, `MonitorDiscrepancyRound2Tests`–`Round7Tests`, `MonitorDiscrepancyStopConfirmationTests` (D-19), `MonitorDiscrepancyConditionKindsTests` (its October 23 extension), `MonitorDiscrepancyPostgresTests`, `MonitorDiscrepancyApiTests` |
 | Contract fixture | `MonitorEndToEndTests.Monitor_http_json_matches_the_browser_contract_fixture` compares real, normalized API JSON with `frontend/src/test/contracts/monitor-api.json` (`VESSEL_UPDATE_CONTRACT_FIXTURES=1` rewrites it); `monitor-contract.test.ts` checks that file with the browser validators |
 | Frontend | `api/event-cursor.test.ts`, `api/sse.test.ts`, `api/monitor.test.ts`, `features/workspace/useMonitorEvents.test.tsx`, `features/monitor/MonitorPanel.test.tsx`, `features/monitor/review47.test.tsx`, `test/contracts/monitor-contract.test.ts` |
 | Browser smoke | `scripts/monitor-browser-smoke.cjs` (UI-only fixtures, including an unverifiable discrepancy), run by `scripts/release-browser-smoke.cjs` from `verify-release.py --browser-module` |
-| Packaged release | `scripts/verify-release.py`: worker entrypoint, health, non-root user and no ports; AMQP unpublished and management on loopback; unknown or unprovisioned module rejected; events and SSE through nginx; the outbox holding a publication while RabbitMQ is stopped; `verification` receipts in a separate `verifier` worker; restore without the broker volume after `rotate-event-epoch` |
+| Packaged release | `scripts/verify-release.py`: worker entrypoint, health, non-root user and no ports; no broker and one listening connection per worker; unknown module rejected; events and SSE through nginx; live delivery p95 under 2 s; a killed listening connection; catch-up after a stopped Notification Hub; `verification` receipts in a separate `verifier` worker; restore after `rotate-event-epoch`; upgrade from the previous release's broker deploy files |
 | Full stack | `scripts/e2e-full-stack.py`, the full-stack end-to-end scenario |
 
 Run the frontend checks with `pnpm --filter vessel-frontend test` and the packaged checks as in [deploy/README.md](../../deploy/README.md#local-release-verification).

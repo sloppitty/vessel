@@ -120,6 +120,7 @@
   <div class="eyebrow">Vessel · Play monitor architecture · October 16, 2026</div>
   <h1>Play monitor, events and workers: architecture overview</h1>
   <p class="lead">How events, the broker, worker modules, the account monitor and discrepancies fit together. This page is a visual summary of the implemented design; names and defaults match the code.</p>
+  <p class="lead"><strong>November 20, 2026 (issue #99):</strong> RabbitMQ and Wolverine were removed. Events and Check requests now wake the workers through PostgreSQL <code>LISTEN/NOTIFY</code>, sent with the transaction that commits them; there are no topics, queues, dead-letter queues or envelope schemas. The broker parts of the diagrams below are history. Subscriptions, receipts, catch-up, retention and the monitor are unchanged. The current design is in <a href="messaging-and-workers.md#transport">messaging and workers</a>.</p>
   <p class="muted">Details: <a href="messaging-and-workers.md">messaging, events and workers reference</a> (<code>messaging-and-workers.md</code>) · decisions: <a href="play-monitor-plan.md">monitor plan</a> · browser API: <a href="play-monitor-api-contract.md">monitor API contract</a> · operations: <a href="../../deploy/README.md">deploy/README.md</a></p>
 </header>
 

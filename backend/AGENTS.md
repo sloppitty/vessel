@@ -7,17 +7,19 @@ contract that holds the detail.
 
 ## Boundaries
 
-- Domain and Application never reference Wolverine, RabbitMQ or other concrete
-  infrastructure. Wolverine and RabbitMQ code lives in `Vessel.Messaging`; feature
-  modules register their own topology and hosted services.
+- Domain and Application never reference concrete infrastructure, including the
+  event transport (PostgreSQL `LISTEN/NOTIFY` since issue #99; no broker or
+  Wolverine). The listening host code lives in `Vessel.Messaging`, the
+  `pg_notify` outbox in Persistence; feature modules register their own
+  subscriptions, commands and hosted services.
 - A bounded Application-owned `IUnitOfWork` owns saves and the one commit. Nested
   stores never commit or dispatch, and object-storage I/O refuses inside any unit
   or transaction.
-- PostgreSQL is the record and RabbitMQ the transport. Events come from Vessel
-  state changes, written with their outbox envelope in the same transaction,
-  never from re-read rows. Subscriptions are provisioned only by the explicit
-  insert-only step; recovery is the subscriber's catch-up from the database,
-  never a producer republish ([messaging and workers][msg]).
+- PostgreSQL is the record and the transport. Events come from Vessel state
+  changes, written with their `pg_notify` in the same transaction, never from
+  re-read rows. A notification is only a wake-up; subscriptions are provisioned
+  only by the explicit insert-only step; recovery is the subscriber's catch-up
+  from the database, never a producer republish ([messaging and workers][msg]).
 - Use cases check venue capabilities, never venue names. Venue adapters translate
   their encoding into normalized facts; matching, lifecycle and sizing never read
   a venue's encoding, and net-of-fee P&L is never reduced by its fee twice.
@@ -163,7 +165,8 @@ contract that holds the detail.
   throwaway database. Tests migrate unique temporary schemas and drop only those.
 - An installation is migrated only in an upgrade the owner authorizes, by the
   operator's explicit one-shot `migrate` step. The API and workers never migrate
-  or provision at startup; `provision-messaging` is explicit too.
+  or provision at startup; `provision-messaging` (subscription registrations
+  only) is explicit too.
 - A migration that needs an upgrade step says so in the pull request and the
   release notes.
 

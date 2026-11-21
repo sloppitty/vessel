@@ -1,13 +1,13 @@
 # Vessel backend
 
-ASP.NET Core 10 API and background worker over PostgreSQL, with RabbitMQ (through Wolverine) as event and command transport. This file covers running, testing, migrating and configuring. For structure, modules, flows and conventions read the [backend guide](../docs/architecture/backend-guide.md); for events, subscriptions, the worker and its operations read [messaging and workers](../docs/architecture/messaging-and-workers.md).
+ASP.NET Core 10 API and background worker over PostgreSQL, which is also the event and command transport (`LISTEN/NOTIFY`, issue #99). This file covers running, testing, migrating and configuring. For structure, modules, flows and conventions read the [backend guide](../docs/architecture/backend-guide.md); for events, subscriptions, the worker and its operations read [messaging and workers](../docs/architecture/messaging-and-workers.md).
 
 ## Running
 
 From the repository root, the usual development path is the scripts in `package.json` (see [development setup](../docs/development.md)):
 
 ```sh
-pnpm db:migrate    # start PostgreSQL and RabbitMQ, apply migrations, provision messaging
+pnpm db:migrate    # start PostgreSQL, apply migrations, register the event subscriptions
 pnpm dev:api       # API on http://127.0.0.1:5080
 pnpm dev:worker    # worker running the monitor module
 ```
@@ -21,7 +21,7 @@ dotnet run --project backend/src/Vessel.Api       # launch profile: Development,
 dotnet run --project backend/src/Vessel.Worker
 ```
 
-The API and worker need `ConnectionStrings__Vessel`, `Vessel__Messaging__RabbitMqUri` and at least one `Vessel__Identity__Origins__<n>`. Sign-in is by Ethereum wallet only: `identity ensure-owner` and `identity bind-wallet` (offline commands of the API binary, run by `pnpm db:migrate` and `pnpm dev:identity`) give the configured owner a wallet. The database connection is resolved lazily, so `GET /health/live` answers without one. Outside Development the API refuses to start without a connection string, a non-default owner GUID and `https://` origins; `Vessel__Auth__Token`, or a `Vessel__Auth__Mode` other than `Wallet`, refuses startup everywhere. Development OpenAPI is at `/openapi/v1.json` behind the same session. Production packaging, TLS and proxies are in [deploy/README.md](../deploy/README.md).
+The API and worker need `ConnectionStrings__Vessel` and at least one `Vessel__Identity__Origins__<n>`. Sign-in is by Ethereum wallet only: `identity ensure-owner` and `identity bind-wallet` (offline commands of the API binary, run by `pnpm db:migrate` and `pnpm dev:identity`) give the configured owner a wallet. The database connection is resolved lazily, so `GET /health/live` answers without one. Outside Development the API refuses to start without a connection string, a non-default owner GUID and `https://` origins; `Vessel__Auth__Token`, or a `Vessel__Auth__Mode` other than `Wallet`, refuses startup everywhere. Development OpenAPI is at `/openapi/v1.json` behind the same session. Production packaging, TLS and proxies are in [deploy/README.md](../deploy/README.md).
 
 ## Testing
 
@@ -45,7 +45,7 @@ Release, or use `--filter` to narrow a run further.
 | `Vessel.UseCases.Tests` | Application services/use cases over in-memory stores, fake venues, fake clocks and fake units of work. No web host, real venue HTTP adapters or external services. |
 | `Vessel.Venues.Tests` | Venue adapters and venue-common code, recorded JSON, fake HTTP/WebSocket transports, registry, catalogue/candle caches and market streams. Live venue reads stay opt-in. |
 | `Vessel.Api.Tests` | In-process `WebApplicationFactory`/`TestServer` HTTP tests with no external service, including contracts, auth, transport, compression, SSE and diagnostics. |
-| `Vessel.Integration.Tests` | PostgreSQL, RabbitMQ and S3 tests, including API/worker tests over PostgreSQL, isolation, multi-owner and migrations. Also non-venue infrastructure without external services, such as filesystem evidence, persistence/messaging helpers, credentials, identity and host composition. |
+| `Vessel.Integration.Tests` | PostgreSQL and S3 tests (event delivery through `LISTEN/NOTIFY` included), including API/worker tests over PostgreSQL, isolation, multi-owner and migrations. Also non-venue infrastructure without external services, such as filesystem evidence, persistence/messaging helpers, credentials, identity and host composition. |
 | `Vessel.TestKit` | A non-test class library for support needed by more than one project, environment-gated attributes and shared fixtures. Single-project helpers stay beside their users. Unit links the value-only support sources rather than referencing the hosting/infrastructure support assembly. |
 
 Choose by the heaviest dependency: external service → Integration; web host →
@@ -63,29 +63,27 @@ unchanged:
 | Variable | Enables |
 | --- | --- |
 | `Vessel_TEST_POSTGRES` | PostgreSQL tests. A real, disposable database where the user can `CREATE SCHEMA`. Each test migrates its own random `vessel_test_<uuid>` schema and drops it afterwards; the database and other schemas are never touched. |
-| `Vessel_TEST_EVENT_RABBIT` | RabbitMQ transport, worker and end-to-end tests (also needs `Vessel_TEST_POSTGRES`). A disposable `amqp://` broker; each test uses its own topology prefix. |
 | `VESSEL_TEST_S3_ENDPOINT`, `VESSEL_TEST_S3_ACCESS_KEY`, `VESSEL_TEST_S3_SECRET_KEY` | S3-compatible evidence store tests. |
 | `Vessel_TEST_RISEX_ADDRESS`, `Vessel_TEST_LIGHTER_PUBLIC=1` | Live public venue reads. |
 
-For example, with throwaway PostgreSQL and RabbitMQ containers published on
-non-default loopback ports:
+For example, with a throwaway PostgreSQL container published on a non-default
+loopback port:
 
 ```sh
 Vessel_TEST_POSTGRES='Host=127.0.0.1;Port=25432;Database=vessel_tests;Username=vessel_tests;Password=disposable-only' \
-Vessel_TEST_EVENT_RABBIT='amqp://vessel_tests:disposable-only@127.0.0.1:25672' \
 pnpm test:integration
 ```
 
-Release CI sets the first two, see `.github/workflows/checks.yml`. `pnpm check`
+Release CI sets the first one, see `.github/workflows/checks.yml`. `pnpm check`
 still builds and tests the whole solution. Shared fixtures live in
 `Vessel.TestKit/Fixtures`; project references copy them, including the linked
 original evidence JPEG, into consumers' output directories at the same
-`Fixtures/...` paths. Never point tests at the owner's database, broker or
+`Fixtures/...` paths. Never point tests at the owner's database or
 object store, and never load the repository's `.env` for test runs.
 
 ## Migrating
 
-Schema changes and messaging topology are applied explicitly; the API and worker never migrate at startup. With `ConnectionStrings__Vessel` (and the broker settings for provisioning) set, from `backend/`:
+Schema changes and subscription registrations are applied explicitly; the API and worker never migrate at startup. With `ConnectionStrings__Vessel` set, from `backend/`:
 
 ```sh
 dotnet tool restore
@@ -110,7 +108,7 @@ Secrets go in the process environment or an ignored local file, never in tracked
 | `Vessel__Credentials__ActiveKeyId`, `Vessel__Credentials__Keys__<id>` or `Vessel__Credentials__KeyFile` | none | Key ring for encrypted venue tokens; see [venue credentials](../docs/architecture/venue-credentials.md). |
 | `Vessel__ForwardedHeaders__KnownProxies__<n>`, `__KnownNetworks__<n>`, `__ForwardLimit` | loopback only | Trusted reverse proxies; explicit settings replace the loopback default. |
 | `Vessel__Venues__<Venue>__BaseUrl` (and `Hyperliquid__StreamUrl`) | production hosts | Venue hosts for `Hyperliquid`, `Risex`, `Lighter`, `LighterRh`. |
-| `Vessel__Messaging__RabbitMqUri` | none | `amqp://` or `amqps://` broker; required by the API and worker. Other `Vessel__Messaging__*` settings (`Prefix`, `Deployments`, `StorageSchemas`, `DeliveryLimit`) are described in messaging and workers. |
+| `Vessel__Messaging__Deployments__<name>__<n>`, `Vessel__Messaging__Verification` | per-module deployments, `false` | The deployment map heartbeat health reads, and the test-only `verification` subscription; see messaging and workers. Delivery itself needs no setting. |
 | `Vessel__Worker__Modules__<n>`, `Vessel__Worker__Deployment` | `["monitor"]`, first module | Modules a worker runs and its logical deployment. |
 | `Vessel__Monitor__Interval`, `__ManualCooldown`, `__ProtectionGrace`, … | 10 min, 60 s, 10 min | Monitor timing; the full list is in messaging and workers. |
 | `Vessel__Events__RetentionDays` | `90` | Event retention. |

@@ -13,7 +13,7 @@ Vessel is a self-hosted trading diary with isolated journals per user. The backe
 - links venue orders to Plays and moves Plays between Planned, Open and Closed from linked fills;
 - derives Activity (position round trips), Overview totals, Review metrics and sizing suggestions from those facts;
 - records funding payments as signed settlements beside the fills;
-- checks open Plays against the venue in a separate background worker and records every change as an event that the browser streams and RabbitMQ subscribers receive;
+- checks open Plays against the venue in a separate background worker and records every change as an event that the browser streams and subscribers receive through PostgreSQL notifications;
 - serves public market data (candles, market context, a live stream) and stores evidence images.
 
 It never places orders, never signs anything at a venue and never treats a price touch as a fill.
@@ -29,7 +29,7 @@ backend/
     Vessel.Application/       use cases, DTOs and ports (interfaces); no package references
     Vessel.Persistence/       EF Core DbContext, stores (port implementations), migrations
     Vessel.Infrastructure/    auth, credential vault, evidence storage, venue adapters, shared use-case registration
-    Vessel.Messaging/         Wolverine/RabbitMQ adapter: outbox, topology, subscriptions, feature modules
+    Vessel.Messaging/         LISTEN/NOTIFY host: listening connection, live delivery, provisioning, feature modules
     Vessel.Identity/          separate identity schema, EOA/session auth and offline administration
     Vessel.Api/               composition root, middleware and HTTP endpoints
     Vessel.Worker/            background host (monitor scheduler, subscription catch-up, event retention)
@@ -71,7 +71,7 @@ flowchart LR
 | Persistence | `VesselDbContext`, per-entity configurations, one store class per port, the `UnitOfWork`, the event store, dispatcher and retention (`Events/`), explicit migrations. Registers the context and stores. | Business rules beyond locking and storage. |
 | Infrastructure | Owner context (claims of the identity module's session), AES-GCM credential vault, evidence object stores (local and S3-compatible), venue adapters and their caches. `ApplicationServices` (`AddVesselApplication()`, `AddVesselMonitoring()`): the use-case registrations both hosts share, and the host-side `Monitoring/MonitorRunExecutor`. | Use-case logic. |
 | Identity | Identity context/migrations, EOA verification, cookies/sessions, owner directory and offline identity administration. References Application only. | Journal tables, journal unit of work or Infrastructure/Persistence references. |
-| Messaging | The only project that references Wolverine and RabbitMQ: the outbox behind `IVesselEventOutbox`, the `vessel.events` topic and subscription queues, provisioning commands, and feature modules (`Modules/Monitor`) that declare their own topology and hosted services. | Business decisions; Domain and Application never reference it. |
+| Messaging | The listening side of the PostgreSQL `LISTEN/NOTIFY` transport (issue #99): `PostgresNotificationListener`, live delivery to the dispatcher, the monitor command handler, provisioning commands, and feature modules (`Modules/Monitor`) that declare their own subscriptions, commands and hosted services. The `pg_notify` outbox behind `IVesselEventOutbox` is in Persistence. | Business decisions; Domain and Application never reference it. |
 | Api | `Program.cs` pipeline (calls the shared `AddVesselApplication()` and `AddVesselMonitoring()`), endpoint mapping files and transport rules for credentials, compression, forwarded headers and production configuration. | Business decisions. |
 | Worker | `Program.cs` (`WorkerHost`): the same shared registrations, then the modules in `Vessel:Worker:Modules` (default `["monitor"]`, whose `MonitorScheduler` claims due accounts) and owner-aware subscription maintenance. Shipped in the API image with its own entrypoint. | HTTP endpoints, fixed-owner background contexts or implicit migrations. |
 
@@ -371,7 +371,7 @@ Journal migrations live in `Vessel.Persistence/Migrations`; identity migrations 
 | `Vessel__Evidence__…` | Upload limits and storage (`Local` root by default, or `Provider=S3`). |
 | `Vessel__Monitor__…` | Check interval, protection grace, manual cooldown, heartbeat timeout, watch and unobservable lifetimes. |
 | `Vessel__Events__…` | Event retention days, stream poll interval and `StreamMaxLifetime`. |
-| `Vessel__Messaging__…`, `Vessel__Worker__…` | RabbitMQ URI and deployments; the worker's modules and deployment name. |
+| `Vessel__Messaging__…`, `Vessel__Worker__…` | Deployment map and the test-only verification subscription; the worker's modules and deployment name. |
 | `Vessel__ForwardedHeaders__…` | Trusted proxies and networks. |
 
 Development setup is in [`docs/development.md`](../development.md); production in [`deploy/README.md`](../../deploy/README.md).
@@ -384,8 +384,8 @@ dotnet test backend/Vessel.slnx
 
 - The five test projects separate value-only rules, fake-backed Application use cases, venue adapters, service-free API hosts and integration infrastructure. Choose by the heaviest dependency: external service → Integration; web host → Api; real venue adapter → Venues; Application service with fakes → UseCases; otherwise Unit. Mixed files split by method, retaining namespaces and method names.
 - `tests/Vessel.TestKit` holds support shared across projects, gated attributes and recorded/evidence fixtures. Unit compiles only its value-only shared support sources and references Domain/Application, not the hosting support assembly. Helpers used by one project stay there.
-- Run `pnpm test:unit`, `pnpm test:usecases`, `pnpm test:venues`, `pnpm test:api` or `pnpm test:integration`; `pnpm test:backend` and `dotnet test backend/Vessel.slnx` run all five. Integration's PostgreSQL/RabbitMQ/S3 tests skip without the explicit disposable-service variables documented in [backend/README.md](../../backend/README.md). Live venue tests remain opt-in in Venues. End-to-end tests remain scripts.
-- `[PostgresFact]` tests need `Vessel_TEST_POSTGRES` (CI provides it). Each test migrates a random schema and drops it afterwards; they never touch the development tables. Broker tests need `Vessel_TEST_EVENT_RABBIT`.
+- Run `pnpm test:unit`, `pnpm test:usecases`, `pnpm test:venues`, `pnpm test:api` or `pnpm test:integration`; `pnpm test:backend` and `dotnet test backend/Vessel.slnx` run all five. Integration's PostgreSQL/S3 tests skip without the explicit disposable-service variables documented in [backend/README.md](../../backend/README.md). Live venue tests remain opt-in in Venues. End-to-end tests remain scripts.
+- `[PostgresFact]` tests need `Vessel_TEST_POSTGRES` (CI provides it). Each test migrates a random schema and drops it afterwards; they never touch the development tables.
 - Live venue tests are opt-in (`Vessel_TEST_RISEX_ADDRESS`, `Vessel_TEST_LIGHTER_PUBLIC=1`).
 - `pnpm check` runs the full repository check, as CI does.
 

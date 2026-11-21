@@ -138,7 +138,7 @@ and public wallet address below. **Never supply a private key or seed phrase.**
 
 ```sh
 docker compose config --quiet
-docker compose up -d --wait postgres rabbitmq
+docker compose up -d --wait postgres
 docker compose run --rm migrate
 # migrate runs check-config → identity bundle → journal bundle → identity ensure-owner → provision-messaging.
 # Readiness is 503, reason no-operator-wallet, until this explicit binding:
@@ -162,7 +162,7 @@ applies the API's startup validation (owner GUID, connection string present,
 and the identity settings both workers also read: refusal of the removed Token
 settings, owner rules, origins including the HTTPS-only rule outside Development, registration
 policy, allow-list addresses, session/stream limits, cookie names, schema and the
-legacy-owner flag) **without opening a database or broker connection**, so it
+legacy-owner flag) **without opening a database connection**, so it
 works on a first install before the identity schema exists. A rejected setting
 stops `migrate` before either bundle. Run it alone with the same overlay set:
 
@@ -225,9 +225,9 @@ deadlines. Lighter's adapter semaphore **remains per process**. Manual Check
 queues even at capacity; the claim waits for capacity. `WorkerConcurrency`
 (default 2) bounds the worker process, not a deployment-wide venue total.
 
-`Vessel:Messaging:Deployments` must be **identical on API, worker and provisioning
-hosts**, including any custom module map; the API filters monitor heartbeat
-health by its own map. Heartbeats are per deployment, not per user.
+`Vessel:Messaging:Deployments` must be **identical on API and worker hosts**,
+including any custom module map; the API filters monitor and notification
+heartbeat health by its own map. Heartbeats are per deployment, not per user.
 `retry-event-receipts` requires `--owner <guid>` **or** `--all-owners`; with
 `--all-owners`, `--limit` is **per owner**, not a global work bound. Registration
 and deregistration of a subscriber are server-wide; handling/progress/receipts
@@ -240,8 +240,11 @@ bounded by the connection string's `Maximum Pool Size` (100 unless set): the
 journal pool for Plays, accounts and events, and the directory pool for identity
 and server-wide state. A journal transaction may read the directory pool, never
 the other way round, so a full pool cannot wait for itself. The Paper worker
-also holds one unpooled connection for its scheduler lock, and Wolverine keeps
-its own pool. Size PostgreSQL's `max_connections` for every process's pools.
+also holds one unpooled connection for its scheduler lock, and every worker that
+runs the monitor, notifications or verification module holds one unpooled
+listening connection (`vessel-listen-<deployment>`; see [Event
+delivery](#event-delivery-postgresql-notifications)). Size PostgreSQL's
+`max_connections` for every process's pools.
 Every API and worker connection carries two session limits, sent as startup
 options:
 
@@ -257,7 +260,11 @@ timeout before the client gives up. `check-config` (and so `migrate`) refuses
 other values by setting name. Connect directly to PostgreSQL or through a pooler
 that passes the `options` startup parameter. PgBouncer refuses it unless
 `ignore_startup_parameters` lists `options`, and then discards it, so the limits
-do not apply behind PgBouncer.
+do not apply behind PgBouncer. Live event delivery uses `LISTEN/NOTIFY`, which
+does not pass through a transaction-pooling proxy such as PgBouncer in
+`transaction` mode either: a worker behind one hears nothing and delivers only
+through its 30-second catch-up. Connect the workers directly or through session
+pooling. The Compose deployment has no pooler.
 
 A request that waits too long, including its session check, answers 503 with
 "The database is busy. Try again in a moment." and `Retry-After: 1`; the server
@@ -285,7 +292,7 @@ subscription, from first-time initialization to the receipt lock.
 
 Install Docker Engine with Docker Compose 2.24.4 or newer on a Linux amd64 host, OpenSSL,
 `uuidgen` and Python 3. Provide persistent disk space for PostgreSQL and evidence
-images in private RustFS S3-compatible storage and the RabbitMQ volume, plus a DNS
+images in private RustFS S3-compatible storage, plus a DNS
 name for remote TLS use. RustFS 1.0.1 is the default; local folders and external S3
 remain configurable. This Compose example deliberately sets `Provider=S3`. The API
 itself remains backward-compatible: no storage settings means `Local`, not an
@@ -296,8 +303,7 @@ The optional credential-key helper needs a source checkout.
 Copy this `deploy/` directory to a private operator directory outside the source
 checkout. Do not reuse the development `.env`, database or LAN preview services.
 In default HTTP mode only web publishes a port. In the TLS overlay Caddy replaces
-that web port. RabbitMQ management is separately published on loopback for
-troubleshooting. PostgreSQL, API, worker, AMQP and RustFS have no host ports; the
+that web port. PostgreSQL, API, worker and RustFS have no host ports; the
 RustFS console is disabled. **Existing folder installations must select the local
 overlay or complete the storage cutover below before switching to the new default.**
 
@@ -312,11 +318,9 @@ runs with:
   log driver for these services. RustFS writes its log to standard output, so the
   same cap applies; it no longer writes a log file inside its container.
 - **No privilege gain and no capabilities**: `no-new-privileges` and `cap_drop: ALL`.
-  Only PostgreSQL and RabbitMQ add back `CHOWN`, `DAC_OVERRIDE`, `SETUID` and
-  `SETGID`: their entrypoints start as root, fix the ownership of their data volume
-  and switch to their own user, and RabbitMQ's health check runs its CLI as root,
-  which must read the server's Erlang cookie. Caddy, nginx, RustFS, the AWS CLI and the API image
-  need none.
+  Only PostgreSQL adds back `CHOWN`, `DAC_OVERRIDE`, `SETUID` and `SETGID`: its
+  entrypoint starts as root, fixes the ownership of its data volume and switches to
+  its own user. Caddy, nginx, RustFS, the AWS CLI and the API image need none.
 - **A read-only root file system**: writes go only to the named volumes, to small
   in-memory `/tmp` mounts (also `/var/run/postgresql` for PostgreSQL and
   `/etc/nginx/conf.d`, owned by nginx's UID 101, for web), and for the API to the
@@ -349,7 +353,7 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Generate the database and broker passwords, the owner GUID and the storage keys
+Generate the database password, the owner GUID and the storage keys
 directly into that private file. This example runs `openssl rand` and `uuidgen` with captured output rather
 than printing secrets to the terminal or shared logs. Do not enable shell tracing
 or record environment dumps.
@@ -365,15 +369,11 @@ text = path.read_text()
 replacements = {
     "REPLACE_WITH_GENERATED_HEX_PASSWORD":
         subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
-    "REPLACE_WITH_GENERATED_BROKER_PASSWORD":
-        subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
     "REPLACE_WITH_GENERATED_GUID":
         subprocess.check_output(["uuidgen"], text=True).strip(),
     "REPLACE_WITH_GENERATED_S3_ACCESS_KEY":
         subprocess.check_output(["openssl", "rand", "-hex", "16"], text=True).strip(),
     "REPLACE_WITH_GENERATED_S3_SECRET_KEY":
-        subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
-    "REPLACE_WITH_GENERATED_BROKER_PASSWORD":
         subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
 }
 for placeholder, value in replacements.items():
@@ -387,9 +387,6 @@ PY
 
 Keep the password hexadecimal. Compose inserts it into an Npgsql connection
 string, so a custom password must not contain connection-string delimiters.
-Keep `RABBITMQ_USER=vessel` or choose a lowercase ASCII username. The broker
-password must be hexadecimal because Compose places it in the private AMQP URI.
-Never use `guest`, print that URI, or publish AMQP outside the private network.
 Set `Vessel__Auth__OwnerName` if desired. Keep the generated owner GUID for the
 life of this installation. Changing it hides existing owner-scoped records.
 Then replace `VESSEL_IDENTITY_ORIGIN` with the installation's public HTTPS
@@ -405,34 +402,34 @@ If these overlap a host, VPN or Docker network, change `VESSEL_NETWORK_SUBNET`,
 `VESSEL_NETWORK_GATEWAY`, `VESSEL_WEB_IP` and `VESSEL_TLS_PROXY_IP` together.
 Keep both service IPs inside the subnet and distinct from its gateway.
 
-## Event messaging: RabbitMQ
+## Event delivery: PostgreSQL notifications
 
-Committed events are recorded in PostgreSQL and relayed after commit through a
-durable outbox to RabbitMQ, which is transport, not the record. Compose runs the
-pinned `rabbitmq:4.3.6-management` image with the `RABBITMQ_USER`/`RABBITMQ_PASSWORD`
-credentials from `.env`, a named `rabbitmq` volume for durable quorum queues and a
-`rabbitmq-diagnostics -q ping` healthcheck. AMQP stays on the private Compose
-network. The management page binds to `VESSEL_RABBITMQ_MANAGEMENT_BIND`
-(default `127.0.0.1:15672`) for troubleshooting; reach it through an SSH tunnel or
-an HTTPS proxy, never plain HTTP on the internet.
+Vessel needs no message broker (issue #99; RabbitMQ was removed in 0.4.3).
+PostgreSQL is the record: each event is written once in the transaction of the
+change it describes, together with a `pg_notify` on the channel
+`vessel.events:<schema>`, which PostgreSQL delivers only if that transaction
+commits. Each worker that runs a subscription or consumes a command keeps one
+dedicated listening connection (application name `vessel-listen-<deployment>`)
+and hands every notification to the same dispatcher that catch-up uses, so an
+event usually reaches its subscriber within a second. The receipt in PostgreSQL
+is the subscriber's record: delivery is at least once, a repeated notification
+changes nothing, and failed attempts are retried by catch-up with the receipt's
+attempt limit. A Check works the same way: the API writes the pending request to
+`monitor_accounts` and notifies `vessel.commands.monitor:<schema>`; the monitor
+worker wakes its scheduler.
 
-Publishers write each event once to the topic exchange `vessel.events`, with the
-event type as routing key. Each subscriber owns a queue `vessel.events.sub.<name>`
-bound by its filter, with a dead-letter exchange and queue `….dlx`/`….dlq` and a
-quorum delivery limit of 20 as a transport guard. Account monitor commands use the
-point-to-point queue `vessel.commands.monitor`, which the worker's `monitor`
-module listens to. This release registers no production event subscription.
+A notification is only a hint. When a listening connection is lost, the worker
+logs one warning with the error type, reconnects after 1 second (doubling to 30
+seconds) and loses nothing: catch-up finds every event that has no settled receipt
+within about a minute (a 30-second pass after a 30-second grace), and the scheduler
+claims a pending Check on its next 30-second tick. The API listens to nothing.
+Notifications do not pass through a transaction-pooling proxy; see [Database
+timeouts](#database-timeouts).
 
 The one-shot `migrate` service applies the EF migrations and then runs
-`provision-messaging`: Wolverine envelope storage for every logical deployment
-(`wolverine_api`, `wolverine_monitor`) with its module set recorded in
-`messaging_deployments`, the broker topology of every module and insert-only
-subscription registrations. Neither the API nor a worker creates storage or
-declares topology at startup. A host whose deployment was not provisioned, or
-whose schema was provisioned for a different module set, refuses to start, so no
-deployment recovers envelopes it has no route for. To change the modules of an
-existing deployment, stop it, let its outbox drain, and provision it under a new
-deployment name (and schema) instead of editing the old one.
+`provision-messaging`, which now only inserts the subscription registrations of
+every compiled-in module (insert-only; existing registrations and their progress
+are kept). Neither the API nor a worker provisions anything at startup.
 Administrator commands run in the API image with the server configuration:
 
 ```sh
@@ -441,18 +438,20 @@ docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dl
 # Return a subscription's failed receipts to pending with a bounded extra budget.
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
   retry-event-receipts <name> --owner <guid> --limit 100 --attempts 3
-# Remove a subscription's registration, receipts and queue.
+# Remove a subscription's registration, progress and receipts.
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
   deregister-event-subscription <name>
 ```
 
 Retry requires exactly one of `--owner <guid>` or `--all-owners`. With
 `--all-owners`, `--limit` applies per owner, not to the command's total.
+Terminal failures, unknown owners and unknown events are logged by event ID at
+Warning; there are no dead-letter queues. Inspect `failed` receipts with the SQL in
+the [worker reference](../docs/architecture/messaging-and-workers.md#inspect-subscriptions-receipts-and-monitor-rows).
 
 A release check can set `Vessel__Messaging__Verification=true` on `migrate` to
 register the `verification` subscription, prove delivery from its receipts and
-then deregister it. Dead-letter queues are diagnostic copies; redriving one never
-reopens a settled receipt.
+then deregister it.
 
 ## Image storage: RustFS by default
 
@@ -692,7 +691,7 @@ the owner GUID from `.env` and the public address of a wallet you control;
 
 ```sh
 docker compose config --quiet
-docker compose up -d --wait postgres rabbitmq
+docker compose up -d --wait postgres
 docker compose run --rm migrate
 docker compose run --rm --no-deps \
   --entrypoint dotnet migrate /app/Vessel.Api.dll identity bind-wallet \
@@ -701,34 +700,35 @@ docker compose up -d
 docker compose ps -a
 ```
 
-`up` runs `/app/migrate` again as a deliberate one-shot step after healthy
-PostgreSQL and RabbitMQ. The wrapper validates the configuration, runs the
+`up` runs `/app/migrate` again as a deliberate one-shot step after a healthy
+PostgreSQL. The wrapper validates the configuration, runs the
 identity and journal EF bundles, ensures the operator user, then runs messaging
-provisioning (envelope storage, broker topology and insert-only subscription
-registrations). It then starts API and both workers and waits for API readiness
+provisioning (insert-only subscription registrations). It then starts API and both workers and waits for API readiness
 before starting web. Readiness stays 503 (`no-operator-wallet`) until an active
 operator has a bound wallet, so a first `up` without the binding never finishes.
 The EF bundle reads `ConnectionStrings__Vessel` from its environment through the
 design-time factory. The password is not an argument and the bundle does not
-print it. Neither API nor worker migrates or auto-provisions message storage at
-startup. Missing storage is a setup error, not permission to migrate a live database.
+print it. Neither API nor worker migrates or provisions at startup. A missing
+migration is a setup error, not permission to migrate a live database.
 
 The worker uses `/app/worker` in the same versioned API image and has no HTTP
 ingress or host port. It runs the modules in `Vessel__Worker__Modules` (Compose:
 `monitor`) in the logical deployment `Vessel__Worker__Deployment` (default: the
-first module), which names its envelope schema (`wolverine_monitor`) and service.
-An unknown module stops startup. Replicas of one deployment share its schema.
+first module), which names its heartbeat and its listening connection
+(`vessel-listen-monitor`). An unknown module stops startup. Replicas of one
+deployment each listen and share its heartbeat.
 Every worker also runs subscription catch-up for the subscriptions it hosts and
 the hourly event retention sweep; both are claimed in PostgreSQL and safe with
 replicas. Journal operations resolve in fresh assigned owner scopes, and each
-message is validated through the identity directory. Unknown owners dead-letter, suspended owners' commands are
-dropped/logged and their events acknowledged for later catch-up; new work starts
-only for active users. Logs contain IDs, never payloads.
+message is validated through the identity directory. Unknown owners are logged and
+dropped, suspended owners' commands are dropped/logged and their events left for
+later catch-up; new work starts only for active users. Logs contain IDs, never
+payloads.
 
 `RunAccountMonitor` commands are only a hand-off: the pending request lives in
-PostgreSQL (`monitor_accounts`), the listener acknowledges once it has validated
-it and wakes the scheduler, and a lost command is found on the next 30-second
-tick. After each productive scheduling pass (discovery and claims), the worker
+PostgreSQL (`monitor_accounts`), its notification wakes the scheduler once the
+listener has validated it, and a lost notification is found on the next
+30-second tick. After each productive scheduling pass (discovery and claims), the worker
 writes its **deployment** database heartbeat and a local heartbeat file holding the time and the
 configured timeout; `/app/worker-health` rejects a missing, malformed or older
 file. If the file cannot be written, the database heartbeat is not recorded
@@ -751,7 +751,7 @@ for the arithmetic.
 
 The Notification Hub runs as `worker-notifications`: the same image and entrypoint
 with `Vessel__Worker__Modules__0: notifications` in its own deployment
-(`wolverine_notifications`). It hosts the `notifications` subscription to every
+(`notifications`, listening as `vessel-listen-notifications`). It hosts the `notifications` subscription to every
 event type, writes in-app notifications in the receipt's own transaction, and
 deletes notifications older than `Vessel__Notifications__RetentionDays` (default
 90) hourly. It never opens venue tokens, so it gets no credential key ring. After
@@ -769,7 +769,7 @@ the worker's first module is `notifications`. The API reports it as
 without re-provisioning: registration is server-wide, but receipts/progress,
 notifications, preferences, feed cursors, unread counts, popup claims and API
 reads/writes are owner-scoped. Operator role never reads another journal.
-Suspended owners' live deliveries are acknowledged **without** producing
+Suspended owners' live deliveries are skipped **without** producing
 notifications; active-owner handling resumes through retained catch-up after
 restore/unsuspension. Retention runs per retained owner, including suspended
 owners, without a request scope.
@@ -800,8 +800,8 @@ example, adding `-f compose.paper.yaml --profile paper` to your established
 Compose command enables the private `worker-paper` service.
 
 It runs the same `/app/worker` binary with only the `paper` module and deployment
-`paper`. This standalone scheduler does not use command queues, messaging
-envelope schemas or RabbitMQ; it needs no paper messaging provisioning, HTTP
+`paper`. This standalone scheduler listens for no notification and hosts no
+event subscription; it needs no paper messaging provisioning, HTTP
 session, credential key ring, evidence mount or exposed port. Existing
 monitor/notifications deployments and their immutable module sets stay unchanged.
 Their normal migrations/provisioning requirements still apply to the full app.
@@ -840,7 +840,7 @@ replica running. The paper worker still needs the same identity settings and
 identity directory as the API; retain your complete TLS/storage overlays on
 every command.
 
-### Monitor and broker settings
+### Monitor settings
 
 `VESSEL_MONITOR_INTERVAL`, `VESSEL_MONITOR_PROTECTION_GRACE` and
 `VESSEL_MONITOR_MANUAL_COOLDOWN` are TimeSpan strings, such as `00:10:00`.
@@ -876,74 +876,10 @@ manual deadline and returns it as `Retry-After` when admission is throttled.
 worker wrote into that file. `Vessel:Events:RetentionDays` defaults to 90.
 Pruning leaves pending delivery work and deduplication history intact.
 
-RabbitMQ is pinned to `rabbitmq:4.3.6-management`, with a named `rabbitmq`
-volume and a stable hostname. Durable quorum queues, the `vessel.events`
-topic exchange and consumer bindings are declared by the explicit provisioning
-step. Publisher confirmations do not replace consumer receipts.
-`VESSEL_RABBITMQ_MANAGEMENT_BIND` defaults to `127.0.0.1:15672`. Use an SSH tunnel
-or an HTTPS proxy to reach it remotely, never plain HTTP to the internet.
-Before upgrading RabbitMQ, enable the current version's feature flags and follow
-its supported upgrade path.
-
-PostgreSQL is the record; RabbitMQ is transport. Subscribers recover unsettled
-retained events from PostgreSQL through catch-up, and pending manual requests are
-recovered from `monitor_accounts` with their original request ID. A lost broker
-volume costs latency, not data; dead-letter contents and broker diagnostics are not
-reconstructed. Do not add the broker volume to the database/evidence backup
-archive.
-
-### Broker users and passwords
-
-`RABBITMQ_USER`/`RABBITMQ_PASSWORD` create the broker's administrator on the
-**first** start of an empty `rabbitmq` volume only; changing them in `.env` later
-does not change the broker. That user is what `migrate` needs to declare topology.
-Use URL-safe passwords (for example `openssl rand -hex 24`): Compose places them in
-an AMQP URI.
-
-Rotate each broker user separately: change the password in RabbitMQ first, then the matching `.env` value, then recreate only the services that use that user. `rabbitmqctl` reads the new password from standard input, and the shell's `read -s` keeps it out of the terminal, shell history and process arguments. Compose reads `.env` itself; its values are not exported to your shell, so name the user explicitly.
-
-Administrator (`RABBITMQ_USER`, used by `migrate`, and by API and worker when no application user is configured):
-
-```sh
-read -rs NEW_PASSWORD   # a new URL-safe value, for example from: openssl rand -hex 24
-printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <administrator-user>
-unset NEW_PASSWORD
-# Edit RABBITMQ_PASSWORD in .env, then recreate what uses the administrator:
-docker compose up -d --force-recreate api worker worker-notifications   # only if RABBITMQ_APP_USER is not set
-docker compose run --rm migrate                    # confirms provisioning works with the new password
-```
-
-Application user (`RABBITMQ_APP_USER`, used by API and worker):
-
-```sh
-read -rs NEW_PASSWORD
-printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <application-user>
-unset NEW_PASSWORD
-# Edit RABBITMQ_APP_PASSWORD in .env, then:
-docker compose up -d --force-recreate api worker worker-notifications
-```
-
-Recreate every other service that uses the same user too, for example additional worker services. Between the broker change and the recreation, the running hosts keep their existing connections; a reconnect with the old password fails until they are recreated, and their outboxes hold publications meanwhile.
-
-For least privilege, API and worker can use a separate, non-administrator
-application user limited to the `vessel.` names (hosts declare nothing at
-runtime: no reply queue, no topology), while `migrate` keeps the administrator.
-The broker tests pass with exactly these permissions. Create it once and set `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`
-in `.env`; without them API and worker use the administrator:
-
-```sh
-read -rs NEW_PASSWORD   # the value you also put in RABBITMQ_APP_PASSWORD
-printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl add_user vessel-app
-unset NEW_PASSWORD
-# configure, write (commands are published through the default exchange), read
-docker compose exec rabbitmq rabbitmqctl set_permissions -p / vessel-app \
-  '^vessel\..*' '^(vessel\..*|amq\.default)$' '^vessel\..*'
-docker compose up -d --force-recreate api worker worker-notifications
-```
-
-The management page is published for troubleshooting and bound to loopback by
-default; it shows queue contents to anyone with broker credentials. Leave
-`VESSEL_RABBITMQ_MANAGEMENT_BIND` on loopback unless an HTTPS proxy fronts it.
+PostgreSQL is the record and carries the wake-ups too. Subscribers recover
+unsettled retained events from PostgreSQL through catch-up, and pending manual
+requests are recovered from `monitor_accounts` with their original request ID.
+A lost notification or listening connection costs latency, not data.
 
 Open your HTTPS URL and sign in with the bound wallet. Signing only proves the
 address: it is not a transaction or approval and needs no network switch. The
@@ -1193,6 +1129,56 @@ post-steps after `migrate`, before any host starts. The sections below keep
 what the script cannot do for earlier releases. Stopping every writer, the
 backup, `VESSEL_VERSION`, `migrate` and the restart are what `upgrade` does.
 Each section's requirements also apply to every later upgrade that crosses it.
+
+### Upgrade to 0.4.3
+
+0.4.3 removes RabbitMQ (issue #99): events and Checks wake the workers through
+PostgreSQL notifications, and the API and workers need only PostgreSQL. The
+manifest `docs/releases/v0.4.3.upgrade.json` lists the release's migrations and
+post-step; none of them concerns messaging, and no migration drops anything of
+the broker's.
+
+1. **Keep a copy of the 0.4.2 deploy files** (`compose.yaml` and its overlays)
+   and of the `.env` lines `RABBITMQ_*`: a rollback to 0.4.2 needs them.
+2. Replace the deploy files with 0.4.3's, `vessel` included. Leave `.env` as it
+   is; Compose ignores the old `RABBITMQ_*` lines.
+3. `./vessel upgrade --to 0.4.3 --yes`. It stops every writer as usual and
+   leaves the running `rabbitmq` container alone: no 0.4.3 host uses it, it is
+   not a writer and it is not started again. `preflight` and `upgrade` print a
+   `warn` line about it. Undelivered Wolverine envelopes need no drain: catch-up
+   delivers every event without a settled receipt from PostgreSQL, and the
+   scheduler finds pending Checks in `monitor_accounts`.
+4. Check the upgraded hosts (`./vessel status`, `docker compose ps -a`). The API
+   reports the workers online and a test notification arrives within seconds.
+
+Once no rollback to 0.4.2 is needed, remove what the broker left. These steps
+change nothing Vessel reads; take a `./vessel backup --yes` first:
+
+```sh
+# The retired broker container and its volume (the project name is in .env or `docker compose ls`).
+docker rm -f "$(docker ps -aq --filter label=com.docker.compose.project=<project> --filter label=com.docker.compose.service=rabbitmq)"
+docker volume rm <project>_rabbitmq
+# Delete the RABBITMQ_* and VESSEL_RABBITMQ_MANAGEMENT_BIND lines from .env.
+# Wolverine's envelope schemas, in one transaction:
+docker compose exec -T postgres psql -U vessel -d vessel -v ON_ERROR_STOP=1 -c \
+  'BEGIN; DROP SCHEMA IF EXISTS wolverine_api CASCADE; DROP SCHEMA IF EXISTS wolverine_monitor CASCADE;
+   DROP SCHEMA IF EXISTS wolverine_notifications CASCADE; DROP SCHEMA IF EXISTS wolverine_verification CASCADE;
+   COMMIT;'
+```
+
+List the schemas first (`\dn wolverine*`): an installation with a custom
+`Vessel__Messaging__StorageSchemas__<deployment>` or other deployments has other
+names. The `messaging_deployments` table stays: it belongs to the journal's
+migrations, is no longer read or written, and a later release drops it.
+
+**Rollback to 0.4.2** restores the pre-upgrade backup, which still holds the
+Wolverine schemas, so put the broker back first: restore the 0.4.2 deploy files
+and the `RABBITMQ_*` lines, start it (`docker compose up -d --wait rabbitmq`, with
+its old volume if you kept it, or an empty one), then `./vessel rollback --yes`.
+`rollback` refuses a 0.4.2 target while the configuration has no `rabbitmq`
+service. With an empty broker volume, the `migrate` that `rollback --start` (or
+your next `migrate`) runs declares the topology again; events of the rolled-back
+period are delivered by catch-up.
 
 ### From v0.4.1 to v0.4.2
 
@@ -1484,7 +1470,7 @@ change nothing and print no `.env` values:
 
 Its changing commands print their plan and change nothing without `--yes`.
 Each first stops every writer, which is every running container of the project
-except PostgreSQL, RabbitMQ and RustFS: API, `worker`, `worker-notifications`,
+except PostgreSQL and RustFS (and a RabbitMQ left by 0.4.2): API, `worker`, `worker-notifications`,
 `worker-paper`, any other worker service, web and TLS. It cannot see replicas on
 other Docker hosts; stop those yourself. This is never a rolling upgrade.
 
@@ -1522,8 +1508,7 @@ exits at start, both logging the unknown migration IDs (see
 `./vessel backup --yes` stops every writer, writes a new
 `backups/vessel-<UTC time>/` directory (mode 700, never overwritten) with
 `vessel.dump` (both schemas), the RustFS or local evidence archive, SHA-256
-sums in `manifest.json`, and starts again what was running. The RabbitMQ volume
-is excluded: subscribers recover unsettled events from PostgreSQL. Keep backups
+sums in `manifest.json`, and starts again what was running. Keep backups
 private and test restores in an isolated installation.
 
 What it does not include, back up separately:
@@ -1552,9 +1537,8 @@ volumes, not an existing installation. Copy the deploy files and create a privat
 `.env` with a new database password, the **same** `Vessel__Auth__OwnerId`, and the
 saved operator settings. Select the image
 version that produced the backup first. Bind web to an unused loopback port and
-choose an unused subnet and pinned service IPs. Do not start web, API or worker yet. The
-broker volume is not restored; RabbitMQ starts empty and subscribers recover
-unsettled retained events from PostgreSQL.
+choose an unused subnet and pinned service IPs. Do not start web, API or worker yet.
+Subscribers recover unsettled retained events from PostgreSQL through catch-up.
 
 With a backup made by `./vessel backup` or `upgrade`, run
 `./vessel restore --from /private/backups/vessel-<time> --yes [--keep-active <guid>]`
@@ -1707,10 +1691,16 @@ advance exits with code 3 after its two-minute test limit (about three minutes o
 the run). For delivery it sets
 `Vessel__Messaging__Verification=true` on `migrate` and runs the `verification`
 subscription in a separate `verifier` worker (deployment `verification`), leaving
-the monitor worker's configuration as shipped: receipts prove live delivery, an
-outbox that holds the publication while RabbitMQ is stopped, delivery after the
-broker returns and after a restore without the broker volume; the subscription is
-deregistered at the end. The fixture replaces only the upstream
+the monitor worker's configuration as shipped: receipts prove live delivery through
+PostgreSQL notifications at under 2 seconds at the 95th percentile (measured over 20
+events from detection to settled receipt), delivery after the verifier's listening
+connection is killed, catch-up after the Notification Hub and the verifier were
+stopped, and delivery after a restore; the subscription is deregistered at the end.
+The stack runs no broker, and each worker holds one listening connection. The
+upgrade check starts the previous release from its own deploy files (RabbitMQ
+included up to 0.4.2), switches to this release's files, checks that `./vessel
+upgrade` leaves the retired broker running, removes it and its volume, and then
+proves broker-free delivery on the upgraded hosts. The fixture replaces only the upstream
 for its nginx transport test, not production code. Cleanup runs on success/failure.
 The browser check uses synthetic API data and intercepts chart market reads, with
 no real venue call. Run frontend/.NET checks separately as in `docs/development.md`.
@@ -1795,8 +1785,7 @@ python3 scripts/e2e-full-stack.py --keep        # leave the stack, temp director
 ```
 
 It builds the API and web images as `vessel-e2e:api`/`vessel-e2e:web` and runs the
-real Compose stack (PostgreSQL, RabbitMQ with the least-privilege application user,
-RustFS, migrate, API, monitor and notifications workers, a `verifier` worker for the `verification`
+real Compose stack (PostgreSQL, RustFS, migrate, API, monitor and notifications workers, a `verifier` worker for the `verification`
 subscription and web behind the Caddy TLS overlay with `tls internal`) on its own
 project, unused subnet and loopback ports, with generated secrets and a synthetic
 owner. The owner signs in with a publicly known synthetic EOA (signer index 1,
@@ -1817,8 +1806,8 @@ point at an existing host package instead. The scenario covers
 explicit provisioning and insert-only registration for both subscriptions,
 notification topology and per-deployment health, Refresh, automatic linking by a Check,
 fills opening and closing Plays, confirmed and dismissed discrepancies, closed-Play
-watches, orphaned entries, omitted executions, broker outage and broker volume
-loss, a worker killed mid-read with a second replica recovering after the lease,
+watches, orphaned entries, omitted executions, killed listening connections and a
+stopped subscriber recovered by catch-up, a worker killed mid-read with a second replica recovering after the lease,
 a disabled account with a pending Check, admin receipt retry, retention, and
 backup/restore with an epoch rotation that resets an old SSE cursor. It sets the
 shortest allowed interval, protection grace, lifetimes and retention (one minute,
@@ -1842,8 +1831,12 @@ curl --fail http://127.0.0.1:8080/health/ready
   line `The monitor loop made no progress for …` (or `notifications`/`paper`), was
   stopped by its own watchdog and restarted. Look at the lines before it, and at
   database reachability. Exit code 1 with `Vessel worker refused to start.` is the
-  schema check below; exit code 1 with `could not start (…)` is configuration,
-  migrations or the broker.
+  schema check below; exit code 1 with `could not start (…)` is configuration or
+  migrations.
+- `The notification listener lost its PostgreSQL connection (…); reconnecting in …`
+  at Warning: a worker's listening connection dropped. It reconnects by itself;
+  delivery meanwhile falls back to catch-up (about a minute). Repeated lines mean
+  PostgreSQL is unreachable or a transaction-pooling proxy sits between them.
 
 Do not publish operator `.env`, `docker inspect`, `docker compose config`, request
 bodies or full environment dumps; they can contain secrets. The API logs safe

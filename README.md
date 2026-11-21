@@ -72,12 +72,11 @@ Then start development:
 
 ```sh
 pnpm db:up
-pnpm broker:up
 pnpm db:migrate
 pnpm dev
 ```
 
-The runner starts the API, monitor worker and frontend. Only the API and worker receive server credentials. API uses loopback 5080, frontend 5180, PostgreSQL 55432 and RabbitMQ 55672 (management 55673). `db:migrate` applies EF migrations and provisions both messaging schemas and broker bindings explicitly. Stop the runner with Ctrl+C; database and broker volumes remain. These processes do not replace the existing LAN prototype.
+The runner starts the API, monitor worker and frontend. Only the API and worker receive server credentials. API uses loopback 5080, frontend 5180 and PostgreSQL 55432. `db:migrate` applies EF migrations and registers the event subscriptions explicitly. Stop the runner with Ctrl+C; the database volume remains. These processes do not replace the existing LAN prototype.
 
 The owner-requested actual-app LAN review is currently **http://10.1.0.219:5180/**, backed by the real API and migrated local database. Sign in with the wallet bound to the preview's owner; there is no API token. See [LAN operation and stop/recreate instructions](docs/development.md#current-lan-review). This is a restricted HTTP development preview, not an internet/production deployment.
 
