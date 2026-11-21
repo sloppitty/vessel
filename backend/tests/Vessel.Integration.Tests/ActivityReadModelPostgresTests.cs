@@ -1,5 +1,7 @@
+using System.Data.Common;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
 using Vessel.Api;
@@ -408,6 +410,54 @@ public sealed class ActivityReadModelPostgresTests
             await writer.SaveChangesAsync();
         }
         Assert.NotEqual(before, Version(await SameAsync(paths, new(PageSize: "10"))));
+    }
+
+    /// <summary>Runs a change once, right after the first transaction this context commits.</summary>
+    private sealed class AfterFirstCommit(Func<Task> change) : DbTransactionInterceptor
+    {
+        public int Fired { get; private set; }
+
+        public override async Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (Fired++ == 0) await change();
+        }
+    }
+
+    [PostgresTheory]
+    [InlineData("funding-attempt")]
+    [InlineData("disable")]
+    public async Task Verify_reports_no_difference_when_an_account_or_funding_attempt_changes_while_it_runs(string change)
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var seed = await SeedAsync(database, fills: 80);
+        var venues = GoldenJournal.Venues();
+        await using (var paths = new Paths(database, seed.Owner, new Clock(End.AddDays(2)), venues))
+            await SameAsync(paths, new(PageSize: "10"));
+        Verified(await VerifyAsync(database, seed.Owner, venues));
+        var gross = seed.Accounts[0].Id;
+        // The change keeps every build current (a funding attempt is not history; a disabled account simply leaves the scope)
+        // yet moves the owner-wide version, so a comparison taken from a later snapshot would differ.
+        var interceptor = new AfterFirstCommit(async () =>
+        {
+            await using var writer = database.Context(seed.Owner);
+            if (change == "funding-attempt")
+                (await writer.FundingStates.SingleAsync(s => s.AccountId == gross)).LastAttemptToUtc = End.AddHours(3);
+            else
+            {
+                var account = await writer.Accounts.SingleAsync(a => a.Id == gross);
+                account.UpdateSettings(account.Name, account.PortfolioId, false);
+            }
+            await writer.SaveChangesAsync();
+        });
+        await using (var db = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(database.ConnectionString)
+                         .AddInterceptors(interceptor).Options, new CoreOwner(seed.Owner)))
+            Verified(await new ActivityReadModel(db, new ActivityStore(db), new ActivityReadModelState(), venues).VerifyAsync(default));
+        Assert.True(interceptor.Fired > 0);
+        // The change did land: the next verify reads it.
+        var after = await VerifyAsync(database, seed.Owner, venues);
+        Assert.Empty(after.Differences);
+        if (change == "disable") Assert.Equal(seed.Accounts.Length - 2, after.Accounts);
     }
 
     [PostgresFact]

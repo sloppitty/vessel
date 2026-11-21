@@ -332,7 +332,8 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
     /// <summary>
     /// <c>activity-verify</c>: recomputes the owner's whole real aggregate in memory, from the facts read in the same snapshot as
     /// the stored parts, and compares every current part with that aggregate's part for the account, operation by operation,
-    /// then the owner-wide version and coverage. Parts that are not current are counted, never compared. Read-only.
+    /// then the owner-wide version and coverage, read as a page in that same snapshot. Parts that are not current are counted,
+    /// never compared. Read-only.
     /// </summary>
     public async Task<ActivityVerifyResult> VerifyAsync(CancellationToken ct)
     {
@@ -341,11 +342,16 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
         ActivityObservations observed;
         List<Guid> stale;
         Dictionary<Guid, Dictionary<string, ActivityProjectedOperation>> stored;
+        ActivityProjectedPage? page = null;
         await using (var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
         {
             (observed, parts, stale) = await CurrentAsync(null, ct);
             facts = await store.ReadAsync(null, TradingMode.Real, ct);
             stored = await OperationsAsync(observed.Accounts.Select(a => a.Id).ToArray(), ct);
+            // The owner-wide page from the same snapshot: a later snapshot can differ in funding attempts or enabled accounts
+            // without any build changing.
+            if (stale.Count == 0 && observed.Accounts.Count > 0)
+                page = await ReadPageAsync(observed, parts, new ActivityFilter(null, null, null, null, null, null, null), 1, 1, ct);
             await transaction.CommitAsync(ct);
         }
         var aggregate = ActivityService.Aggregate(facts, TradingMode.Real, null, null, venues);
@@ -373,19 +379,11 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
             foreach (var id in rows.Keys.Except(want.Operations.Select(o => o.Id)))
                 Differ($"Account {account.Id}: operation {id} is not in the aggregate.");
         }
-        if (stale.Count == 0 && observed.Accounts.Count > 0)
+        if (page is not null)
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
-            var (now, nowParts, nowStale) = await CurrentAsync(null, ct);
-            // Compare the owner-wide page only when nothing changed since the facts read.
-            if (nowStale.Count == 0 && nowParts.Values.All(p => parts.TryGetValue(p.State.AccountId, out var before) && before.State.BuildId == p.State.BuildId))
-            {
-                var page = await ReadPageAsync(now, nowParts, new ActivityFilter(null, null, null, null, null, null, null), 1, 1, ct);
-                if (page.Version != aggregate.Version) Differ("The owner-wide version differs.");
-                if (JsonSerializer.Serialize(page.Coverage) != JsonSerializer.Serialize(aggregate.Coverage)) Differ("The owner-wide coverage differs.");
-                if (page.ScopeCount != aggregate.Operations.Count) Differ("The owner-wide operation count differs.");
-            }
-            await transaction.CommitAsync(ct);
+            if (page.Version != aggregate.Version) Differ("The owner-wide version differs.");
+            if (JsonSerializer.Serialize(page.Coverage) != JsonSerializer.Serialize(aggregate.Coverage)) Differ("The owner-wide coverage differs.");
+            if (page.ScopeCount != aggregate.Operations.Count) Differ("The owner-wide operation count differs.");
         }
         return new(observed.Accounts.Count, operations, stale.Count, differences);
     }
