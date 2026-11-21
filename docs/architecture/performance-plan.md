@@ -712,3 +712,58 @@ limit: the owner-wide aggregate needs about 425 MiB by the cache's conservative 
 size needs `Vessel:Activity:CacheCapacityBytes` raised (here 1 GiB, at about 2.6 GB peak RSS) or a smaller retained
 representation. The charge's 768-byte per-row base, about twice the retained size measured on October 18, is
 unchanged here.
+
+## 2026-11-20 — Activity read model (issue #108, first slice)
+
+At four times today's size the owner-wide Activity aggregate (about 425 MiB by the cache's charge) never fits the default
+cache, so every Activity read recomputed it (about 2.6 s, above). Activity pages, filters and counts now come from a
+per-account read model in SQL, built by the same aggregate; see the read model section of `activity-operations.md` and
+`deploy/README.md` (migration `20261120200000_ActivityReadModelTables`, commands `activity-rebuild` and `activity-verify`,
+setting `Vessel:Activity:ReadModel`).
+
+**Equivalence.** `scripts/benchmark.py` now runs `activity-rebuild --apply` and `activity-verify` after seeding and fails
+the run on any difference. `activity-verify` found no difference on 15,532 stored operations at scale 1 and 61,672 at
+scale 4. The integration tests compare every Activity response field (pages at two sizes and past the end, every filter,
+scope, account and account detail, coverage, facets, unattributed funding, unrealized marks and the version) between the
+two paths over the golden journal and a synthetic journal, before and after history, observation and position changes.
+
+**Figures.** Measured on `a6d69fb0`, seed 1, 3 years, anchored 2026-11-20T00:00Z, 3 warm-up and 10 measured rounds, on the
+shared 8-CPU, 20 GB development VM (host load 2.3–7.5 while other agents' jobs ran), API built with SDK 10.0.302.
+"Before" is the same build with `--activity-read-model memory` (`Vessel:Activity:ReadModel=Memory`, the in-memory
+aggregate with #107's cache), so the code under test is the only difference. Medians in milliseconds, before → after;
+columns as in the #107 table.
+
+| Read | Scale 1 steady | Scale 1 fill write | Scale 1 observation | Scale 4 steady | Scale 4 fill write | Scale 4 observation |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Activity, page 1 | 7.1 → 13.4 | 1,663.1 → 2,324.8 | 21.9 → 14.2 | 2,675.5 → 32.0 | 4,876.9 → 3,955.8 | 2,679.9 → 32.9 |
+| Activity, page 79 of 100 rows / page 309 of 100 rows | 7.4 → 17.1 | 733.9 → 492.4 | 20.4 → 17.1 | 2,662.7 → 45.2 | 2,663.2 → 1,625.8 | 2,653.0 → 45.3 |
+| Activity, closed longs in 90 days | 6.4 → 6.9 | 727.4 → 480.1 | 19.5 → 8.2 | 2,635.6 → 9.4 | 2,653.8 → 1,633.8 | 2,673.0 → 10.8 |
+| Activity, executions of one operation | 3.3 → 3.6 | 100.5 → 108.8 | 4.5 → 4.7 | 3.7 → 4.0 | 478.0 → 482.2 | 4.9 → 4.9 |
+| Review, all with imported positions | 539.4 → 534.4 | 1,293.5 → 1,312.9 | 557.0 → 574.3 | 4,945.9 → 4,984.2 | 4,901.2 → 4,970.3 | 4,948.2 → 4,959.7 |
+| Sizing | 56.3 → 58.3 | – | – | 194.1 → 199.1 | – | – |
+| A Play's execution view | 27.0 → 28.5 | 188.6 → 194.3 | 30.6 → 31.9 | 37.8 → 36.9 | 424.6 → 414.2 | 39.1 → 39.1 |
+| Overview summary by portfolio, all | 163.0 → 170.4 | 887.9 → 916.0 | 178.1 → 184.4 | 3,415.0 → 3,493.0 | 3,389.8 → 3,429.7 | 3,373.6 → 3,481.3 |
+| Overview summary by account, 30 days | 23.0 → 24.2 | 761.8 → 779.0 | 39.1 → 37.3 | 2,708.1 → 2,755.1 | 2,730.4 → 2,720.8 | 2,752.4 → 2,749.8 |
+
+API peak RSS: scale 1 974 → 967 MB; scale 4 1,966 → 1,979 MB (the in-memory aggregate is still built for the reads
+listed below). Phases: `activity-rebuild --apply` plus `activity-verify` took 7.8 s at scale 1 and 16.3 s at scale 4.
+
+**What it shows.** At scale 4 every Activity page read falls from about 2.6 s to 9–45 ms, and a read after a routine
+monitor check (only an observation time moved) costs the same as a steady one: nothing is rebuilt. A filtered page is
+under 10 ms. At scale 1, where the in-memory aggregate fits the cache, a cache hit is a few milliseconds faster than the
+SQL page (the page reads its rows and observations from PostgreSQL each time); a deep page of 100 rows costs about
+17 ms. After a history change only the touched account is rebuilt, then the version is hashed again from the stored
+rows, all scoped funding payments and markers: 0.5 s at scale 1 and 1.6 s at scale 4 for most reads. The first read
+after the write ("Activity, page 1", the first Activity endpoint of each round) costs more in both modes, as in the #107
+table; the cause was not isolated here. Reads still built from the in-memory aggregate (Review with imported positions,
+the Overview summary, row expansion, Sizing's fallback, a Play's funding proof) are unchanged.
+
+**Storage.** Operations are kept in two tables: `activity_operations` holds only what SQL counts, filters and sorts by,
+and `activity_operation_rows` the roughly 1 KB list row a page returns. With one wide table the planner sorted whole rows
+for a deep page and spilled to disk (an EXPLAIN on 4,800 operations: 9.9 ms with a 6 MB external merge; after the split
+1.8 ms with an in-memory quicksort). `toast_tuple_target` does not help here: PostgreSQL only toasts rows above about
+2 KB.
+
+**Remaining for #108.** Aggregate on write in the same transaction (per account and contract), so the read after a
+history change rebuilds nothing; serve Review's unassigned count and positions, the Overview summary and the sizing
+fallback from the stored rows; then retire the in-memory path once `activity-verify` has passed on real data.

@@ -20,12 +20,12 @@ internal sealed record GoldenJournalScreens(ActivityService Activity, OverviewSu
     SizingService Sizing, OpenRiskService OpenRisk)
 {
     public static GoldenJournalScreens Create(IActivityStore activityStore, IWorkspaceStore workspaceStore, IReviewStore reviewStore,
-        ISizingStore sizingStore, IOpenRiskStore riskStore, IUnitOfWork unitOfWork)
+        ISizingStore sizingStore, IOpenRiskStore riskStore, IUnitOfWork unitOfWork, IActivityPageReader? pages = null)
     {
         var clock = new GoldenClock();
         var venues = GoldenJournal.Venues();
         var owner = new CoreOwner(GoldenJournal.Owner);
-        var activity = new ActivityService(activityStore, workspaceStore, clock, venues, marks: new MarketContextCache(clock));
+        var activity = new ActivityService(activityStore, workspaceStore, clock, venues, marks: new MarketContextCache(clock), pages: pages);
         var workspace = new WorkspaceService(workspaceStore, owner, venues, unitOfWork);
         return new(activity, new OverviewSummaryService(workspaceStore, workspace, activity, sizingStore, clock),
             new ReviewService(reviewStore, clock, venues, new ActivityReviewPositions(activity, sizingStore)),

@@ -20,6 +20,9 @@
   upgrade`.
 - A `vessel-upgrade` agent skill runs the operator command, and only when the owner asks for
   a deployment.
+- `activity-rebuild [--apply]` and `activity-verify` commands, and the optional
+  `Vessel:Activity:ReadModel` setting (`Projection` by default, or `Memory` for the previous
+  in-memory path).
 
 ### Fixed
 
@@ -171,6 +174,8 @@
   `--tag` refuses a changelog section that does not name, as `#N`, every pull request merged
   since the previous tag; the release pull request (the one that adds the release notes) is
   exempt.
+- Activity pages, filters and counts are served in SQL from a per-account read model: at
+  four times today's history a filtered page takes about 10 ms instead of 2.6 s.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
@@ -189,6 +194,8 @@ workers need these columns, so they must not start against an unmigrated databas
   rolling back copies the current drawings back into it.
 - `20261120143000_ActivityExecutionRevision` adds an execution revision that moves only when
   retained history changes, so observation-only refreshes keep Activity's cache. It is additive.
+- `20261120200000_ActivityReadModelTables` adds the Activity read-model tables. They start
+  empty and are built on the first Activity read, or ahead of time with `activity-rebuild --apply`.
 
 After upgrading: once every updated host is running, rebuild the Plays list projection in
 full, once. Rows that went stale before this release are not repaired by a plain rebuild,

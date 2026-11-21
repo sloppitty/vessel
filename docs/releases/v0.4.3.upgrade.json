@@ -6,7 +6,8 @@
       "20261117102251_UnrecognizedRowOmissions",
       "20261118010457_DatabaseHygieneIndexes",
       "20261120115353_PlayDrawingsTable",
-      "20261120143000_ActivityExecutionRevision"
+      "20261120143000_ActivityExecutionRevision",
+      "20261120200000_ActivityReadModelTables"
     ],
     "identity": []
   },
@@ -17,6 +18,7 @@
     "DatabaseHygieneIndexes creates the pg_trgm extension in public: the database owner may (the Compose example's POSTGRES_USER is); otherwise a superuser runs CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public; before the upgrade (deploy/README.md, Journal search index).",
     "Roll UnrecognizedRowOmissions back only from the pre-upgrade backup.",
     "PlayDrawingsTable copies every Play's drawings into play_drawings; the old plays.\"Drawings\" column stays, unread, until a later release drops it. Roll back from the pre-upgrade backup.",
+    "ActivityReadModelTables adds empty Activity read-model tables; they are built on the first Activity read (or ahead of time with activity-rebuild --apply). Optional setting Vessel:Activity:ReadModel (Projection, the default, or Memory).",
     "New optional setting Vessel:Worker:StaleExitAfter (2 minutes to 2 hours, default 10 minutes): a worker whose loop makes no progress for that long exits with code 3.",
     "New optional settings Vessel:Database:LockTimeout (default 10 seconds) and Vessel:Database:StatementTimeout (default 25 seconds, below the connection's Command Timeout); check-config validates them. They do not apply behind PgBouncer, which drops the options startup parameter.",
     "Size PostgreSQL max_connections for two pools of Maximum Pool Size per API and worker process, plus Wolverine's pool and one paper-worker connection.",

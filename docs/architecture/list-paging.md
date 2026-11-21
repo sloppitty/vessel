@@ -48,6 +48,10 @@ quantity (port `operationStatus` exactly).
 Order: `lastOccurredAtUtc` descending, then account ID, then operation ID
 (ordinal), so pages are deterministic.
 
+November 20, 2026 (#108): real Activity pages, filters and counts run in SQL over
+per-account stored operations built by the same aggregate; responses are
+unchanged. See the read model section of `activity-operations.md`.
+
 Response:
 
 ```text

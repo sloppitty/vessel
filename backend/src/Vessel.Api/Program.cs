@@ -18,6 +18,8 @@ if (args.FirstOrDefault() is "evidence-copy-to-s3" or "evidence-copy-to-local")
     return EvidenceCopyCommand.RunAsync(args[1..], Console.Out, toLocal: args[0] == "evidence-copy-to-local").GetAwaiter().GetResult();
 if (args.FirstOrDefault() is PlaySearchCommand.Name)
     return PlaySearchCommand.RunAsync(args[1..], Console.Out).GetAwaiter().GetResult();
+if (args.FirstOrDefault() is ActivityReadModelCommand.Rebuild or ActivityReadModelCommand.Verify)
+    return ActivityReadModelCommand.RunAsync(args[0], args[1..], Console.Out).GetAwaiter().GetResult();
 if (args.FirstOrDefault() is { } command && MessagingCommands.Names.Contains(command))
     return MessagingCommands.RunAsync(args, Console.Out).GetAwaiter().GetResult();
 
