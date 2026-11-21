@@ -46,7 +46,7 @@ def snapshot(directory):
 
 class ProvisioningReportTests(unittest.TestCase):
     def test_new_and_existing_reports_include_the_hub_and_do_not_depend_on_order(self):
-        prefix = 'Ensured identity user 00000000-0000-4000-8000-000000000001.\nProvisioned envelope storage. '
+        prefix = 'Ensured identity user 00000000-0000-4000-8000-000000000001.\n'
         for report, expected in (
             ('Registered subscriptions: notifications, verification; already registered: none.',
              ({'notifications', 'verification'}, set())),
@@ -153,7 +153,7 @@ class RedactionTests(unittest.TestCase):
         self.e2e.session_cookie = '__Host-vessel-session=' + self.session
         self.e2e.register_secrets()
 
-    def test_a_failed_broker_user_command_reports_operation_and_exit_code_only(self):
+    def test_a_failed_command_with_a_secret_on_stdin_reports_operation_and_exit_code_only(self):
         calls = []
 
         def failing(args, **kwargs):
@@ -163,14 +163,15 @@ class RedactionTests(unittest.TestCase):
             return subprocess.CompletedProcess(args, 70, echoed, 'Error: ' + echoed)
         with mock.patch.object(harness.subprocess, 'run', failing), mock.patch('builtins.print') as printed:
             with self.assertRaises(harness.CommandFailed) as caught:
-                self.e2e.broker_app_user()
+                # A secret travels on standard input only, as a password for a tool that reads it there would.
+                self.e2e.compose('exec', '-T', 'postgres', 'psql', input=self.e2e.database_password.encode())
             message = str(caught.exception)
             self.e2e.step = 'x'
             self.e2e.expect(False, 'step completed', f'{type(caught.exception).__name__}: {harness.redact(caught.exception)}', soft=True)
-        self.assertTrue(calls and all(self.e2e.app_password not in ' '.join(c) for c in calls), 'the password never travels in argv')
-        self.assertIn('rabbitmqctl add_user', message)
+        self.assertTrue(calls and all(self.e2e.database_password not in ' '.join(c) for c in calls), 'the password never travels in argv')
+        self.assertIn('docker compose exec postgres psql', message)
         self.assertIn('exited with 70', message)
-        for secret in (self.e2e.app_password, self.e2e.broker_password, self.e2e.database_password, self.session):
+        for secret in (self.e2e.s3_secret, self.e2e.database_password, self.session):
             self.assertNotIn(secret, message)
             self.assertNotIn(secret, json.dumps(self.e2e.results))
             self.assertNotIn(secret, ' '.join(str(c) for c in printed.call_args_list))
@@ -178,10 +179,10 @@ class RedactionTests(unittest.TestCase):
     def test_expect_and_notes_redact_generated_credentials(self):
         with mock.patch('builtins.print') as printed:
             self.e2e.step = 'x'
-            self.e2e.expect(False, 'detail ' + self.e2e.session_cookie, {'password': self.e2e.app_password}, soft=True)
+            self.e2e.expect(False, 'detail ' + self.e2e.session_cookie, {'password': self.e2e.database_password}, soft=True)
             self.e2e.note('s3 ' + self.e2e.s3_secret)
         text = json.dumps(self.e2e.results) + ' '.join(str(c) for c in printed.call_args_list)
-        for secret in (self.session, self.e2e.app_password, self.e2e.s3_secret):
+        for secret in (self.session, self.e2e.database_password, self.e2e.s3_secret):
             self.assertNotIn(secret, text)
         self.assertIn('[redacted]', text)
 
@@ -190,8 +191,8 @@ class RedactionTests(unittest.TestCase):
             raise subprocess.TimeoutExpired(args, kwargs.get('timeout'))
         with mock.patch.object(harness.subprocess, 'run', timeout):
             with self.assertRaises(harness.CommandFailed) as caught:
-                harness.run('docker', 'exec', 'x', 'rabbitmqctl', 'add_user', 'vessel-app', self.e2e.app_password, timeout=1)
-        self.assertNotIn(self.e2e.app_password, str(caught.exception))
+                harness.run('docker', 'exec', 'x', 'psql', '-c', self.e2e.database_password, timeout=1)
+        self.assertNotIn(self.e2e.database_password, str(caught.exception))
 
 
 class WalletSessionTests(unittest.TestCase):

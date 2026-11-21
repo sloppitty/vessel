@@ -13,7 +13,6 @@
     "dev:worker": "python3 scripts/dev.py worker",
     "dev:identity": "python3 scripts/dev.py identity",
     "db:up": "docker compose up --detach --wait postgres",
-    "broker:up": "docker compose up --detach --wait rabbitmq",
     "db:migrate": "python3 scripts/dev.py migrate",
     "db:stop": "docker compose stop postgres",
     "check": "bash scripts/check.sh",

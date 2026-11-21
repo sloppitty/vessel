@@ -34,7 +34,6 @@ def model(version='1.0.0', storage='rustfs', paper=True, pins=None):
     api_image, web_image = f'skorcius/vessel:api-{version}', f'skorcius/vessel:web-{version}'
     services = {
         'postgres': {'image': 'postgres:18-alpine', 'environment': {'POSTGRES_USER': 'vessel', 'POSTGRES_DB': 'vessel'}},
-        'rabbitmq': {'image': 'rabbitmq:4.3.6-management'},
         'migrate': {'image': api_image, 'environment': {}},
         'api': {'image': api_image, 'environment': {'Vessel__Evidence__Storage__Provider': 'S3'},
                 'volumes': [{'type': 'volume', 'source': 'api-tmp', 'target': '/tmp'}]},
@@ -99,7 +98,7 @@ class FakeStack(vessel.Stack):
         self.version = version
         self.storage_kind = storage
         self.state = containers if containers is not None else [
-            inspect(s) for s in ('postgres', 'rabbitmq', 'rustfs', 'migrate', 'api', 'worker',
+            inspect(s) for s in ('postgres', 'rustfs', 'migrate', 'api', 'worker',
                                  'worker-notifications', 'worker-paper', 'web')]
         for item in self.state:
             if item['Config']['Labels']['com.docker.compose.service'] in ('migrate', 'storage-init'):
@@ -228,7 +227,7 @@ class HelperTests(unittest.TestCase):
 
     def test_writers_are_every_running_host_but_the_data_stores_front_first(self):
         containers = [vessel.Container(inspect(s)) for s in
-                      ('postgres', 'rabbitmq', 'rustfs', 'api', 'worker', 'worker-notifications', 'worker-paper',
+                      ('postgres', 'rustfs', 'api', 'worker', 'worker-notifications', 'worker-paper',
                        'verifier', 'web', 'tls')]
         containers.append(vessel.Container(inspect('migrate', oneoff=True)))
         containers.append(vessel.Container(inspect('worker', state='exited', number=2)))
@@ -431,7 +430,7 @@ class ChangingCommandTests(ReadOnlyCommandTests):
         self.assertEqual(('manual', '1.0.0', 'rustfs', 1), (manifest['kind'], manifest['version'],
                                                            manifest['storage']['kind'], manifest['storage']['entries']))
         self.assertEqual({'journal': JOURNAL, 'identity': IDENTITY}, manifest['migrations'])
-        self.assertEqual(sorted(hosts + ['postgres', 'rabbitmq', 'rustfs', 'web']), manifest['services'])
+        self.assertEqual(sorted(hosts + ['postgres', 'rustfs', 'web']), manifest['services'])
         self.assertEqual(0o700, stat.S_IMODE(directory.stat().st_mode))
         self.assertEqual(0o600, stat.S_IMODE((directory / 'vessel.dump').stat().st_mode))
 
@@ -491,7 +490,7 @@ class ChangingCommandTests(ReadOnlyCommandTests):
         self.assertLess(kinds.index('archive'), kinds.index('migrate'))
         self.assertEqual(('migrate', '1.1.0'), stack.events[kinds.index('migrate')])
         self.assertEqual(('dotnet', 'play-search-rebuild', '--apply'), stack.events[kinds.index('migrate') + 1])
-        self.assertEqual(('up', 'api', 'postgres', 'rabbitmq', 'rustfs', 'web', 'worker', 'worker-notifications',
+        self.assertEqual(('up', 'api', 'postgres', 'rustfs', 'web', 'worker', 'worker-notifications',
                           'worker-paper'), stack.events[-1])
         self.assertEqual('POSTGRES_PASSWORD=secret\nVESSEL_VERSION=1.1.0\nOTHER=x\n', self.env_text())
         self.assertNotIn('secret', out)
@@ -623,6 +622,33 @@ class ChangingCommandTests(ReadOnlyCommandTests):
             quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
         self.assertEqual([], stack.events)
 
+    def test_upgrade_leaves_a_retired_broker_running_and_never_starts_it(self):
+        # Issue #99: a RabbitMQ container from 0.4.2 or earlier is neither a writer nor a service to start again.
+        stack = self.stack()
+        stack.state.append(inspect('rabbitmq', image='rabbitmq:4.3.6-management'))
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        Path(self.directory.name, '.env').write_text('VESSEL_VERSION=1.0.0\n')
+        report = vessel.Report()
+        _, out = quietly(vessel.preflight_checks, stack, None, report)
+        self.assertIn('warn  rabbitmq still runs but this configuration no longer uses it', out)
+        self.assertFalse(report.failed)
+        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True, manifest=self.upgrade_manifest()))
+        self.assertEqual(0, code, out)
+        self.assertEqual(('up', 'api', 'postgres', 'rustfs', 'web', 'worker', 'worker-notifications',
+                          'worker-paper'), stack.events[-1])
+        self.assertFalse([e for e in stack.events if e[0] == 'stop' and 'rabbitmq' in e[1]])
+        self.assertEqual('running', stack.service_of('rabbitmq-1-id')['State']['Status'])
+        [directory] = list(stack.backup_root.iterdir())
+        self.assertNotIn('rabbitmq', vessel.load_backup(directory)[1]['services'])
+
+    def test_rollback_to_a_broker_release_needs_its_compose_files_back_first(self):
+        stack = self.stack()
+        self.pre_upgrade(stack, '0.4.2')
+        with self.assertRaisesRegex(vessel.Failure, '0.4.2 needs RabbitMQ'):
+            quietly(vessel.rollback, stack, Args(yes=True))
+        self.assertEqual([], stack.events)
+        self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+
     def test_set_env_version_changes_only_that_line(self):
         path = Path(self.directory.name, '.env')
         path.write_bytes(b'# VESSEL_VERSION=0.1.0 stays a comment\r\nA=1\r\nVESSEL_VERSION=1.0.0\r\nB=2')
@@ -654,7 +680,7 @@ class ChangingCommandTests(ReadOnlyCommandTests):
                              '11111111-1111-1111-1111-111111111111'),
                             ('dotnet', 'rotate-event-epoch')]
                 if start:
-                    expected += [('migrate', '1.0.0'), ('up', 'api', 'postgres', 'rabbitmq', 'rustfs', 'web', 'worker',
+                    expected += [('migrate', '1.0.0'), ('up', 'api', 'postgres', 'rustfs', 'web', 'worker',
                                                         'worker-notifications', 'worker-paper')]
                 self.assertEqual(expected, stack.events)
                 if not start:
@@ -709,7 +735,7 @@ class ChangingCommandTests(ReadOnlyCommandTests):
                 item['State']['Status'] = 'exited'
         code, out = quietly(vessel.rollback, stack, Args(yes=True, start=True))
         self.assertEqual(0, code, out)
-        self.assertEqual(('up', 'api', 'postgres', 'rabbitmq', 'rustfs', 'worker', 'worker-paper'), stack.events[-1])
+        self.assertEqual(('up', 'api', 'postgres', 'rustfs', 'worker', 'worker-paper'), stack.events[-1])
 
     def test_a_digest_pinned_service_is_refused_before_anything_changes(self):
         # S1: a pinned worker-paper or migrate would stay on the old image while the others upgrade.
@@ -775,7 +801,7 @@ class ChangingCommandTests(ReadOnlyCommandTests):
         code, out = quietly(vessel.restore, stack, Args(source=str(backup), yes=True))
         self.assertEqual(0, code, out)
         self.assertIn('  ' + shlex.join(compose + ['run', '--rm', 'migrate']) + '\n', out)
-        self.assertIn('  ' + shlex.join(compose + ['up', '-d', 'api', 'postgres', 'rabbitmq', 'rustfs', 'web', 'worker',
+        self.assertIn('  ' + shlex.join(compose + ['up', '-d', 'api', 'postgres', 'rustfs', 'web', 'worker',
                                                   'worker-notifications', 'worker-paper']) + '\n', out)
         stack = self.stack(fail={'migrate'}, backup_dir=str(Path(self.directory.name, 'elsewhere')), **selectors)
         stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})

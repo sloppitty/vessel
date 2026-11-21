@@ -1,6 +1,6 @@
 #!/bin/sh
-# One-shot: EF migrations, then explicit messaging provisioning (envelope storage, broker topology and
-# insert-only subscription registrations). The API and workers never migrate or provision at startup.
+# One-shot: EF migrations, then explicit messaging provisioning (insert-only subscription registrations).
+# The API and workers never migrate or provision at startup.
 set -eu
 cd /app
 # The application's own startup validation, without a database connection (first installs have no identity tables).

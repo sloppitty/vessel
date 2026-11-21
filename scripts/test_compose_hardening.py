@@ -20,8 +20,7 @@ COMBINATIONS = [
 ]
 # Capabilities a service demonstrably needs: their entrypoints start as root, fix the data volume's ownership and
 # switch to their own user. Every other service runs with none.
-CAPABILITIES = {'postgres': ['CHOWN', 'DAC_OVERRIDE', 'SETUID', 'SETGID'],
-                'rabbitmq': ['CHOWN', 'DAC_OVERRIDE', 'SETUID', 'SETGID']}
+CAPABILITIES = {'postgres': ['CHOWN', 'DAC_OVERRIDE', 'SETUID', 'SETGID']}
 ONE_SHOT = {'migrate', 'storage-init'}
 
 
@@ -40,7 +39,6 @@ class ComposeHardeningTests(unittest.TestCase):
         if 'compose.paper.yaml' in files:
             command += ['--profile', 'paper']
         env = {'PATH': os.environ['PATH'], 'HOME': str(self.directory), 'POSTGRES_PASSWORD': 'synthetic',
-               'RABBITMQ_USER': 'synthetic', 'RABBITMQ_PASSWORD': 'synthetic',
                'Vessel__Auth__OwnerId': '00000000-0000-4000-8000-000000000001',
                'VESSEL_IDENTITY_ORIGIN': 'https://vessel.invalid', 'VESSEL_TLS_HOST': 'vessel.invalid',
                'VESSEL_VERSION': '0.0.0', 'VESSEL_CREDENTIAL_KEYS_FILE': str(self.ring), **overrides}
@@ -91,12 +89,15 @@ class ComposeHardeningTests(unittest.TestCase):
         targets = {name: [volume['target'] for volume in service.get('volumes', [])] for name, service in services.items()}
         self.assertIn('/etc/nginx/conf.d', tmpfs['web'])
         self.assertIn('/var/run/postgresql', tmpfs['postgres'])
-        for name in ('worker', 'worker-notifications', 'worker-paper', 'migrate', 'web', 'postgres', 'rabbitmq'):
+        for name in ('worker', 'worker-notifications', 'worker-paper', 'migrate', 'web', 'postgres'):
             self.assertIn('/tmp', tmpfs[name], name)
         # The API stages exports and uploads in /tmp on disk, beside its evidence and key ring.
         self.assertEqual({'/tmp', '/var/lib/vessel/evidence', '/run/secrets/vessel-credential-keys.json'}, set(targets['api']))
         self.assertIn('/var/lib/postgresql', targets['postgres'])
-        self.assertIn('/var/lib/rabbitmq', targets['rabbitmq'])
+        # Issue #99: no broker service, volume or connection setting is left.
+        self.assertNotIn('rabbitmq', services)
+        self.assertFalse([(name, key) for name, service in services.items() for key in service.get('environment') or {}
+                          if 'rabbit' in key.casefold()])
         # RustFS logs to stdout (the capped Docker log), not to a file in its read-only image.
         self.assertEqual('', self.config([])['rustfs']['environment']['RUSTFS_OBS_LOG_DIRECTORY'])
 

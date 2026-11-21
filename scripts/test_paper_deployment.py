@@ -54,7 +54,6 @@ class PaperDeploymentTests(unittest.TestCase):
                    "-f", str(ROOT / "deploy/compose.paper.yaml"),
                    "--profile", "paper", "config", "--format", "json"]
         env = {"PATH": os.environ["PATH"], "POSTGRES_PASSWORD": "synthetic",
-               "RABBITMQ_USER": "synthetic", "RABBITMQ_PASSWORD": "synthetic",
                "Vessel__Auth__OwnerId": "00000000-0000-4000-8000-000000000001",
                "VESSEL_VERSION": "synthetic-paper-build", "VESSEL_IDENTITY_ORIGIN": "https://paper.invalid", **overrides}
         return subprocess.run(command, cwd=ROOT, env={k: v for k, v in env.items() if v is not None},

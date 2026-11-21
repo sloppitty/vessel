@@ -99,42 +99,25 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                     self.assertEqual({"PATH": "/bin"}, dev.frontend_environment())
                     self.assertEqual({"PATH": "/bin"}, dev.verification_environment())
 
-    def test_monitor_configuration_and_broker_secrets_stay_in_server_environment(self):
+    def test_monitor_configuration_stays_in_server_environment_and_no_broker_is_configured(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env").write_text(
                 "ConnectionStrings__Vessel=test-connection\n"
-                "RABBITMQ_USER=local-user\nRABBITMQ_PASSWORD=space /@secret\n"
+                "RABBITMQ_USER=stale-user\nRABBITMQ_PASSWORD=stale-secret\n"
                 "Vessel__Monitor__Interval=00:20:00\n"
             )
             with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True):
                 environment = dev.configuration()
                 self.assertEqual("00:20:00", environment["Vessel__Monitor__Interval"])
-                self.assertEqual("amqp://local-user:space%20%2F%40secret@127.0.0.1:55672/",
-                                 environment["Vessel__Messaging__RabbitMqUri"])
+                # Issue #99: delivery uses PostgreSQL only; stale broker values reach no process.
+                self.assertFalse([key for key in environment if "rabbit" in key.casefold()])
                 self.assertEqual({}, dev.frontend_environment())
 
-    def test_api_and_worker_modes_require_broker_credentials_before_starting_anything(self):
+    def test_dev_modes_start_only_postgres_then_the_api_or_both_workers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n")
-            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
-                    patch.object(dev.subprocess, "run") as run, patch.object(dev.subprocess, "Popen") as popen:
-                for mode in ["run", "api", "worker", "migrate"]:
-                    with self.subTest(mode=mode), patch.object(dev.sys, "argv", ["dev.py", mode]):
-                        with self.assertRaises(SystemExit) as stopped:
-                            dev.main()
-                        self.assertIn("RABBITMQ_USER", str(stopped.exception))
-                run.assert_not_called()
-                popen.assert_not_called()
-
-    def test_dev_modes_start_postgres_and_rabbitmq_then_the_api_or_both_workers(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / ".env").write_text(
-                "ConnectionStrings__Vessel=test-connection\n"
-                "RABBITMQ_USER=local-user\nRABBITMQ_PASSWORD=local-password\n"
-            )
             started = []
 
             class Process:
@@ -155,9 +138,8 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     dev.main()
                 run.assert_called_once_with(dev.SERVICES, cwd=root, check=True)
+                self.assertEqual(["docker", "compose", "up", "--detach", "--wait", "postgres"], dev.SERVICES)
                 self.assertEqual(["dotnet", "run", "--project", "backend/src/Vessel.Api"], started[0][0])
-                self.assertEqual("amqp://local-user:local-password@127.0.0.1:55672/",
-                                 started[0][1]["Vessel__Messaging__RabbitMqUri"])
                 # Wallet sign-in accepts writes from the Vite page by default.
                 self.assertEqual(("http://127.0.0.1:5180", "http://localhost:5180"),
                                  (started[0][1]["Vessel__Identity__Origins__0"], started[0][1]["Vessel__Identity__Origins__1"]))
@@ -194,7 +176,6 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 self.assertEqual("paper", paper["Vessel__Worker__Modules__0"])
                 self.assertEqual("paper", paper["Vessel__Worker__Deployment"])
                 self.assertNotIn("Vessel__Worker__Modules__1", paper)
-                self.assertNotIn("Vessel__Messaging__RabbitMqUri", paper)
                 self.assertEqual("/tmp/vessel-dev-paper-heartbeat", paper["Vessel__Paper__HeartbeatFile"])
 
     def test_configured_identity_origins_replace_the_dev_default(self):
@@ -242,8 +223,7 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
     def test_migrate_applies_identity_then_journal_migrations_then_ensures_the_owner(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n"
-                                       "RABBITMQ_USER=local-user\nRABBITMQ_PASSWORD=local-password\n")
+            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n")
             with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
                     patch.object(dev.sys, "argv", ["dev.py", "migrate"]), \
                     patch.object(dev.subprocess, "run") as run:
