@@ -1146,6 +1146,41 @@ unchanged, with the Play's owner, in the same transaction:
   it writes each Play's current drawings back into `plays."Drawings"` and then
   drops `play_drawings`, so edits made after the upgrade are kept.
 
+## Activity read model
+
+Issue #108. Activity pages, filters and counts are served in SQL from stored
+operations instead of recomputing every retained fill in memory. The journal
+migration `ActivityReadModelTables` adds four derived tables
+(`activity_account_revisions`, `activity_projection_accounts`,
+`activity_operations`, `activity_operation_rows`), a sequence and commit
+triggers on the imported-fact tables; it copies nothing and existing data is
+unchanged.
+
+- Stop every writer and back up both schemas before `migrate`, as for any
+  journal migration. The migration itself is quick.
+- The tables start empty. Activity builds each account's stored part on its
+  first read after the upgrade, which on a large journal is as slow as a read
+  was before the upgrade. To build them ahead, run once, after `migrate`
+  (hosts may keep running; dry run without `--apply`):
+
+  ```sh
+  docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll activity-rebuild --apply
+  ```
+
+- To check the stored operations against the in-memory computation on your own
+  data, run `activity-verify` the same way. It is read-only and exits 0 only when
+  every stored operation, account part, version and coverage notice matches and
+  nothing is out of date (run `activity-rebuild --apply` first, or again, if
+  accounts changed in between). It prints account and operation IDs, never
+  amounts.
+- `Vessel:Activity:ReadModel` (environment variable
+  `Vessel__Activity__ReadModel`) is `Projection` by default. `Memory` serves
+  Activity pages from the in-memory aggregate as before, for example if
+  `activity-verify` reports a difference; the tables are then left as they are.
+- Backups need nothing new: the tables are derived and can always be rebuilt.
+  Rolling back: restore the pre-upgrade backup with the previous images; the
+  down migration also simply drops the tables and triggers.
+
 ## Upgrade
 
 Upgrade with `./vessel upgrade --to X.Y.Z --yes` (see

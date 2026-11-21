@@ -288,3 +288,51 @@ A snapshot stored from an incomplete position read (`PositionsComplete` false; s
 
 Native identities its positions carry, their reported leverage and its observation time (the open end of a funding
 window) are still used: those are facts about what the read returned, not claims about what it did not.
+
+## November 20, 2026: read model (#108)
+
+Activity pages, filters and counts are served from stored rows instead of the whole aggregate in memory. Nothing about
+an operation changes: every stored figure is computed by the same `ActivityService.Aggregate`, and the rules above apply
+unchanged.
+
+- **One part per account.** The walk, comparison, funding attribution and leverage all partition by account, so each
+  enabled real account's operations, its own coverage notices (history, snapshot, comparison and identity notices) and
+  its unattributed funding depend on that account's facts alone. `activity_projection_accounts` keeps one part per
+  account: what it was built from, its fill and operation counts, its contracts, those notices and that funding.
+  `activity_operations` keeps what SQL counts, filters and orders its operations by (narrow rows, so a deep page sorts
+  in memory), and `activity_operation_rows` what a page returns: the list row exactly as the version hashes it, and what
+  the unrealized marks read beside it (the partition and the remaining cost basis).
+- **When a part is current.** Deferred commit triggers move a per-account revision (`activity_account_revisions`) on
+  the same changes that move the owner's execution revision (#107), once per transaction per account. A part is current
+  while that revision, its observation key and its snapshot window hold. The observation key is issue #107's rebase rule:
+  the account's venue, history notice, enabled state and mode; whether it has a snapshot, its completeness and positions
+  (market, native market, exact quantity, leverage); its funding coverage window, P&L basis and notice. The snapshot
+  window is the interval in which the snapshot time passes no retained instant of the account (a fill, funding
+  settlement, leverage observation, omission bound or funding coverage bound, widened by a millisecond).
+- **Reads.** A page reads the scoped accounts' observations and parts in one repeatable-read snapshot, rebuilds the
+  parts that are not current (one account per transaction, its facts and revision read in one snapshot; an older build
+  never replaces a newer one), and then counts, filters, orders and pages in SQL, in Activity's order (latest execution
+  descending, then account ID and operation ID, both ordinal), then reads the page's rows by key. Account and portfolio
+  filters become an account set from the same observation read. Forced-event rows, funding coverage notices and the
+  list's order are assembled per read, as the aggregate assembles them. A read that keeps finding history changed under it falls back to the in-memory aggregate
+  after three attempts.
+- **Version.** The token is the aggregate's hash, computed from the stored rows in page order; it is remembered per
+  exact set of account builds and funding attempt details, so another page, filter or a routine observation reads no
+  operation again. Unrealized marks and Play titles are still read for the shown rows only, outside the version.
+- **Monitor checks.** A check that changes no fill or other history moves no revision. When it moves only observation
+  times, inside each snapshot window, it touches no stored row, and the next page rebuilds nothing. A check whose
+  positions, completeness or funding coverage changed makes the next read rebuild that account only; the check itself
+  never writes the read model.
+- **Coverage order.** An account's comparison notices are now listed in partition order (native or canonical market
+  key, ordinal), and accounts' unattributed-funding counts in account order, instead of the unordered fill and funding
+  reads' order, so each account's own part lists them as the aggregate over several accounts does. The version sorts
+  coverage and is unaffected. Unattributed funding rows with the same time and source ID are ordered by ID.
+- **Fallback and checks.** `Vessel:Activity:ReadModel` is `Projection` (default) or `Memory`, which keeps the in-memory
+  aggregate (with #107's cache) for pages until `activity-verify` has passed on an installation's own data. The offline
+  `activity-rebuild [--apply]` builds every owner's parts ahead of the first read (optional); `activity-verify` recomputes
+  each owner's whole aggregate in memory and compares each stored operation, account part, the owner-wide version and
+  coverage with it. See `deploy/README.md`.
+
+Still read from the in-memory aggregate (#107's cache): one operation's executions, the Overview summary, Review's
+imported positions and unassigned counts, the sizing fallback, and a Play's funding proof. Paper Activity is not
+stored; its pages stay in memory.
