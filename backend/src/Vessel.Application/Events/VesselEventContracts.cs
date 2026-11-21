@@ -5,7 +5,7 @@ using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Events;
 
-// Every optional field is written as an explicit null. One serializer policy serves storage, broker and API.
+// Every optional field is written as an explicit null. One serializer policy serves storage and API.
 public sealed record VesselEventSubject(Guid? AccountId = null, string? VenueId = null, string? ContractId = null,
     Guid? PlayId = null, string? EntryId = null, string? LevelId = null, Guid? DiscrepancyId = null);
 public sealed record VesselEventSource(string Trigger, string[]? OrderIds = null, string[]? FillIds = null);

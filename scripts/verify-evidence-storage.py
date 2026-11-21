@@ -23,7 +23,7 @@ def main():
             shutil.copyfile(ROOT / "deploy" / file, path / file)
         # Compose interpolates every service; only rustfs, postgres and storage-init start here.
         (path / ".env").write_text(
-            f"POSTGRES_PASSWORD={postgres_password}\nRABBITMQ_USER=vessel\nRABBITMQ_PASSWORD={secrets.token_hex(24)}\n"
+            f"POSTGRES_PASSWORD={postgres_password}\n"
             f"Vessel__Auth__OwnerId={uuid.uuid4()}\nVESSEL_IDENTITY_ORIGIN=https://localhost\n"
             f"VESSEL_S3_ACCESS_KEY_ID={access}\nVESSEL_S3_SECRET_ACCESS_KEY={secret}\n")
         (path / ".env").chmod(0o600)

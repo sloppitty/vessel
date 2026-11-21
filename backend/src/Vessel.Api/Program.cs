@@ -31,7 +31,7 @@ builder.Services.AddVesselIdentityApi();
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
 builder.Services.AddPaperTrading();
-// The API publishes events and module commands; it runs no module and never provisions at startup.
+// The API stages events and module commands as PostgreSQL notifications; it runs no module and listens to nothing.
 builder.AddVesselMessaging(MessagingHosting.ApiDeployment);
 builder.Services.AddVesselMonitoring(builder.Configuration);
 builder.Services.AddVesselNotifications(builder.Configuration);

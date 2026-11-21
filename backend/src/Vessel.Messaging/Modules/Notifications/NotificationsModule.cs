@@ -10,7 +10,7 @@ namespace Vessel.Messaging.Modules.Notifications;
 /// <summary>
 /// The Notification Hub: one subscription, <c>notifications</c>, to every event type; its rules decide what notifies,
 /// and unknown types are skipped, so adding a category never needs a new subscription name. The in-app channel is
-/// written in the receipt's own transaction, so the module owns no command queue.
+/// written in the receipt's own transaction, so the module consumes no command.
 /// </summary>
 public sealed class NotificationsModule : IVesselModule
 {

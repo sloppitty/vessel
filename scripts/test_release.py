@@ -770,12 +770,12 @@ assert.equal(unexpectedConsoleError(message('Informational message', 'log'), tru
         return check
 
     def test_hardening_accepts_every_service_hardened_and_healthy(self):
-        services = ['postgres', 'rabbitmq', 'rustfs', 'api', 'worker', 'worker-notifications', 'web', 'verifier', 'tls']
+        services = ['postgres', 'rustfs', 'api', 'worker', 'worker-notifications', 'web', 'verifier', 'tls']
         check = self.run_hardening([self.hardened(service) for service in services])
         self.assertGreater(check.counts['hardening'], len(services) * 5)
 
     def test_hardening_rejects_uncapped_logs_privileges_capabilities_writable_roots_and_missing_services(self):
-        services = ['postgres', 'rabbitmq', 'rustfs', 'api', 'worker', 'worker-notifications', 'web', 'verifier', 'tls']
+        services = ['postgres', 'rustfs', 'api', 'worker', 'worker-notifications', 'web', 'verifier', 'tls']
         for broken in ({'LogConfig': {'Type': 'json-file', 'Config': {}}}, {'SecurityOpt': []}, {'CapDrop': []},
                        {'CapAdd': ['NET_ADMIN']}, {'ReadonlyRootfs': False}):
             with self.subTest(broken=broken), self.assertRaises(AssertionError):
@@ -783,7 +783,7 @@ assert.equal(unexpectedConsoleError(message('Informational message', 'log'), tru
         with self.assertRaisesRegex(AssertionError, 'every long-running service'):
             self.run_hardening([self.hardened(service) for service in services if service != 'tls'])
         unhealthy = [self.hardened(service) for service in services]
-        unhealthy[6]['State']['Health']['Status'] = 'unhealthy'
+        unhealthy[services.index('web')]['State']['Health']['Status'] = 'unhealthy'
         with self.assertRaisesRegex(AssertionError, 'web passes its health check'):
             self.run_hardening(unhealthy)
 
@@ -976,7 +976,7 @@ class MigrationPreflightTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             env = root / 'synthetic.env'
-            common = ('POSTGRES_PASSWORD=synthetic\nRABBITMQ_USER=synthetic\nRABBITMQ_PASSWORD=synthetic\n'
+            common = ('POSTGRES_PASSWORD=synthetic\n'
                       'Vessel__Auth__OwnerId=11111111-1111-4111-8111-111111111111\nVESSEL_TLS_HOST=localhost\n'
                       # Leftovers of the removed Token sign-in in an old private .env reach every host, which refuses them.
                       'VESSEL_AUTH_MODE=Token\nVessel__Auth__Token=synthetic-leftover\n')

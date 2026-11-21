@@ -7,7 +7,7 @@ The application lives in `frontend/` and `backend/`. Overview, portfolio/account
 - Node 24, selected by `.nvmrc`, with the engine constraint in root `package.json`.
 - pnpm **12.8.1**, pinned in root `package.json`.
 - .NET SDK **10.0.302**, pinned in `global.json` with patch roll-forward.
-- Docker with Compose for local PostgreSQL and RabbitMQ.
+- Docker with Compose for local PostgreSQL.
 
 Evidence storage keeps the backward-compatible Local default at `data/evidence`
 relative to the API content root; no storage configuration or credentials are
@@ -141,18 +141,17 @@ scheme/client headers. The production credential guard is never disabled.
 transport modes and restores synthetic backups into fresh volumes. Its optional
 `--browser-module` check verifies the built SPA's CSP without real venue calls.
 
-## PostgreSQL and RabbitMQ
+## PostgreSQL
 
-Copy `.env.example` to the ignored root `.env`, set private database and broker passwords and a nonempty owner GUID, and keep the file private. The development runner supports KEY=value entries and optional matching quotes, not shell commands. Then:
+Copy `.env.example` to the ignored root `.env`, set a private database password and a nonempty owner GUID, and keep the file private. The development runner supports KEY=value entries and optional matching quotes, not shell commands. Then:
 
 ```sh
 pnpm db:up
-pnpm broker:up
 ```
 
 The development service binds **only `127.0.0.1:55432`**. It uses PostgreSQL 18 and a named volume. These database credentials and privileges are for local development, not a production security configuration.
 
-`pnpm dev`, `pnpm dev:api`, `pnpm dev:worker` and `pnpm db:migrate` start both services with `docker compose up --wait` first (set `Vessel_DEV_SKIP_SERVICES=1` to manage them yourself), and stop early when the broker credentials are missing, because the API and worker cannot start without the broker. `pnpm dev` runs the API, two workers built once (the `monitor` module, and the `notifications` module in its own deployment with the heartbeat file `/tmp/vessel-dev-notifications-heartbeat`) and the frontend; `pnpm dev:worker` runs both workers; `pnpm dev:api` runs the API alone, so the monitor and notifications show as offline.
+`pnpm dev`, `pnpm dev:api`, `pnpm dev:worker` and `pnpm db:migrate` start PostgreSQL with `docker compose up --wait` first (set `Vessel_DEV_SKIP_SERVICES=1` to manage it yourself). Nothing else is needed: events and Checks wake the workers through PostgreSQL notifications (issue #99). `pnpm dev` runs the API, two workers built once (the `monitor` module, and the `notifications` module in its own deployment with the heartbeat file `/tmp/vessel-dev-notifications-heartbeat`) and the frontend; `pnpm dev:worker` runs both workers; `pnpm dev:api` runs the API alone, so the monitor and notifications show as offline.
 
 To include the optional standalone paper scheduler, use
 `Vessel_DEV_PAPER=1 pnpm dev` (or `pnpm dev:worker` with the same environment
@@ -162,11 +161,8 @@ the monitor/notifications module sets, and uses
 `/tmp/vessel-dev-paper-heartbeat` by default. Paper remains disabled for each
 owner until enabled in Settings; its check interval defaults to 60 minutes.
 The standalone paper host reads public Hyperliquid candles and the journal,
-not venue credentials, evidence storage or RabbitMQ. The normal API/monitor/
-notifications hosts in `pnpm dev` still need the existing broker setup.
+not venue credentials or evidence storage.
 The paper runner does not apply migrations or access a real venue account.
-
-RabbitMQ binds AMQP to `127.0.0.1:55672` and management to `127.0.0.1:55673`. Its credentials stay in the API/worker environment, never Vite. The development runner constructs the connection from `RABBITMQ_USER` and `RABBITMQ_PASSWORD`; an explicit `Vessel__Messaging__RabbitMqUri` overrides it. The production Compose file does not publish AMQP.
 
 Set the backend connection in your process environment or secret manager:
 
@@ -180,7 +176,7 @@ Do not commit the populated value. Migrations are deliberate:
 pnpm db:migrate
 ```
 
-Neither API nor worker migrates or provisions at startup. `pnpm db:migrate` starts both local services if needed, applies the identity and then the journal EF migrations, runs `identity ensure-owner` (the configured owner GUID becomes the operator user), then runs the API binary's explicit `provision-messaging` command: envelope storage and the schema registration of every deployment (`api`, `monitor` and `notifications`), the broker topology of every module and insert-only subscription registrations. A host whose schema was provisioned for other modules refuses to start. The active-Play account/instrument index remains non-unique, with composite owner constraints.
+Neither API nor worker migrates or provisions at startup. `pnpm db:migrate` starts PostgreSQL if needed, applies the identity and then the journal EF migrations, runs `identity ensure-owner` (the configured owner GUID becomes the operator user), then runs the API binary's explicit `provision-messaging` command: insert-only subscription registrations of every module. The active-Play account/instrument index remains non-unique, with composite owner constraints.
 
 ## API and sign-in
 
@@ -218,7 +214,7 @@ In a second terminal:
 pnpm dev:web
 ```
 
-Or start API, worker and frontend with `pnpm dev`. The runner reads private server values from root `.env` and does not pass them to the frontend. `pnpm dev:api` and `pnpm dev:worker` start the individual server processes. Setup remains explicit; neither server migrates implicitly. Use Ctrl+C to stop the runner while retaining PostgreSQL and RabbitMQ.
+Or start API, worker and frontend with `pnpm dev`. The runner reads private server values from root `.env` and does not pass them to the frontend. `pnpm dev:api` and `pnpm dev:worker` start the individual server processes. Setup remains explicit; neither server migrates implicitly. Use Ctrl+C to stop the runner while retaining PostgreSQL.
 
 Open `http://127.0.0.1:5180`. The Vite development proxy forwards `/api` and `/health` to the API. `VESSEL_API_TARGET` can override the server-side proxy target; it is not a token or a browser configuration secret.
 
@@ -318,8 +314,8 @@ resources. The helper never reads `.env`, invokes development Compose, accepts
 an existing database target or reuses containers.
 
 The backend tests migrate unique temporary schemas and drop only those schemas.
-An invalid supplied connection fails. CI supplies separate ephemeral PostgreSQL
-and RabbitMQ services; the release workflow is unchanged.
+An invalid supplied connection fails. CI supplies a separate ephemeral PostgreSQL
+service; the release workflow is unchanged.
 
 For a deliberate partial check without database tests:
 
@@ -330,7 +326,7 @@ pnpm check --no-db
 `--no-db` removes `Vessel_TEST_POSTGRES` from the check process even if it was
 already set. Every backend run reports its skipped count from fresh TRX results,
 and a successful check repeats it on the last line. The count includes any other
-opt-in tests, such as live venue, broker and S3 tests. This is not a substitute
+opt-in tests, such as live venue and S3 tests. This is not a substitute
 for the normal database-backed check.
 
 Node must have full ICU locale data. Before any build, the check verifies that

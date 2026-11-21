@@ -1,75 +1,45 @@
-using JasperFx.Resources;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Ownership;
 using Vessel.Messaging.Modules;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
-using Wolverine;
 
 namespace Vessel.Messaging;
 
-public sealed record ProvisioningResult(IReadOnlyList<string> Schemas, IReadOnlyList<string> Registered, IReadOnlyList<string> Existing);
+public sealed record ProvisioningResult(IReadOnlyList<string> Registered, IReadOnlyList<string> Existing);
 
 /// <summary>
-/// The explicit provision step, run after the EF migrations and never at runtime: envelope storage and the schema
-/// registration of every configured logical deployment, the broker topology of every known module, then insert-only subscription registrations.
+/// The explicit provision step, run after the EF migrations and never at runtime: insert-only registrations of every
+/// known module's subscriptions. Nothing else needs provisioning: delivery uses PostgreSQL notifications.
 /// </summary>
 public static class MessagingProvisioning
 {
     public static async Task<ProvisioningResult> ProvisionAsync(IConfiguration configuration, CancellationToken cancellationToken,
         VesselModuleRegistry? registry = null)
     {
-        var settings = MessagingHosting.Settings(configuration);
-        settings.Validate();
         var connection = configuration.GetConnectionString("Vessel");
         if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("The event database is not configured.");
-        registry ??= VesselModuleRegistry.From(settings);
-        var deployments = settings.DeploymentModules(registry);
-        var schemas = deployments.Keys.Select(settings.SchemaFor).ToArray();
-        if (schemas.Distinct(StringComparer.Ordinal).Count() != schemas.Length)
-            throw new InvalidOperationException("Every logical deployment needs its own envelope schema.");
-        foreach (var (deployment, modules) in deployments)
-        {
-            // Storage only: no transport, so nothing about the broker is inferred from Wolverine's endpoint model.
-            var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
-            builder.Logging.ClearProviders();
-            builder.UseWolverine(options => MessagingHosting.Configure(options, settings, connection, deployment));
-            using var host = builder.Build();
-            await host.SetupResources();
-            await MessagingDeployments.RegisterAsync(connection, settings.SchemaFor(deployment), deployment, modules, cancellationToken);
-        }
-        // Registration first: a changed filter is rejected before any new binding reaches the broker.
+        registry ??= VesselModuleRegistry.From(configuration);
         var registered = new List<string>();
         var existing = new List<string>();
-        await using (var provider = RegistrationServices(configuration))
+        await using var provider = RegistrationServices(configuration);
+        foreach (var subscription in registry.Modules.SelectMany(m => m.Subscriptions))
         {
-            foreach (var subscription in registry.Modules.SelectMany(m => m.Subscriptions))
-            {
-                var created = await provider.GetRequiredService<SystemEventSubscriptionStore>()
-                    .RegisterAsync(subscription, cancellationToken);
-                (created ? registered : existing).Add(subscription.Name);
-            }
+            var created = await provider.GetRequiredService<SystemEventSubscriptionStore>()
+                .RegisterAsync(subscription, cancellationToken);
+            (created ? registered : existing).Add(subscription.Name);
         }
-        await new MessagingTopology(settings, registry).DeclareAsync(cancellationToken);
-        return new(schemas, registered, existing);
+        return new(registered, existing);
     }
 
-    /// <summary>Removes a subscription's registration, receipts and queue, releasing what it held.</summary>
-    public static async Task<bool> DeregisterAsync(IConfiguration configuration, string subscription, CancellationToken cancellationToken,
-        VesselModuleRegistry? registry = null)
+    /// <summary>Removes a subscription's registration, progress and receipts, releasing what it held.</summary>
+    public static async Task<bool> DeregisterAsync(IConfiguration configuration, string subscription, CancellationToken cancellationToken)
     {
-        var settings = MessagingHosting.Settings(configuration);
-        settings.Validate();
-        registry ??= VesselModuleRegistry.From(settings);
-        bool removed;
-        await using (var provider = RegistrationServices(configuration))
-            removed = await provider.GetRequiredService<SystemEventSubscriptionStore>().DeregisterAsync(subscription, cancellationToken);
-        await new MessagingTopology(settings, registry).DeleteSubscriptionQueueAsync(subscription, cancellationToken);
-        return removed;
+        await using var provider = RegistrationServices(configuration);
+        return await provider.GetRequiredService<SystemEventSubscriptionStore>().DeregisterAsync(subscription, cancellationToken);
     }
 
     /// <summary>The bounded admin retry for a compiled-in subscription's failed receipts.</summary>

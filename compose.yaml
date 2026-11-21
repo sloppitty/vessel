@@ -1,24 +1,6 @@
 name: vessel
 
 services:
-  rabbitmq:
-    image: rabbitmq:4.3.6-management
-    hostname: vessel-dev-rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in the ignored .env file}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in the ignored .env file}
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"
-      RABBITMQ_CTL_ERL_ARGS: "+S 1:1"
-    ports:
-      - "127.0.0.1:55672:5672"
-      - "127.0.0.1:55673:15672"
-    volumes:
-      - vessel-rabbitmq:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 24
   postgres:
     image: postgres:18-alpine
     environment:
@@ -38,4 +20,3 @@ services:
 
 volumes:
   vessel-postgres:
-  vessel-rabbitmq:

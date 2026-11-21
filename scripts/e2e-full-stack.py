@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Full-stack end-to-end test of the packaged Vessel images with a fake Hyperliquid venue.
 
-Runs the real Compose stack (postgres, rabbitmq, rustfs, storage-init, migrate, api, monitor and
+Runs the real Compose stack (postgres, rustfs, storage-init, migrate, api, monitor and
 notifications workers, a verifier worker, web behind the Caddy TLS overlay with `tls internal`) on an isolated project,
 unused subnet and loopback ports, with generated secrets, a synthetic owner and synthetic venue data served by
 scripts/e2e/fake_venue.py over TLS (a private CA trusted only by the API and worker containers). The owner signs in
@@ -79,7 +79,7 @@ def redact(text):
 
 
 def operation(args):
-    """The command's operation words (no option values, paths or payloads), e.g. 'docker compose exec rabbitmq rabbitmqctl add_user'."""
+    """The command's operation words (no option values, paths or payloads), e.g. 'docker compose exec postgres psql'."""
     words, skip = [], False
     for arg in map(str, args):
         if skip:
@@ -204,13 +204,12 @@ class E2E:
         self.projects = [self.name, self.name + '-restore']
         self.owner = str(uuid.uuid4())
         self.database_password = secrets.token_hex(24)
-        self.broker_password, self.app_password = secrets.token_hex(24), secrets.token_hex(24)
         self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
         # Wallet sign-in: the synthetic operator EOA's public address and the current session cookie (a secret).
         self.wallet_address, self.session_cookie, self.tool_paths = None, None, None
         self.register_secrets()
         self.https_port, self.redirect_port = free_port(), free_port()
-        self.broker_port, self.control_port = free_port(), free_port()
+        self.control_port = free_port()
         stamp = time.strftime('%Y%m%d-%H%M%S')
         self.artifacts = Path(args.artifacts or Path(tempfile.gettempdir()) / f'vessel-e2e-artifacts-{stamp}')
         self.artifacts.mkdir(parents=True, exist_ok=True)
@@ -225,8 +224,7 @@ class E2E:
     # ---- reporting -----------------------------------------------------------------------------------
 
     def register_secrets(self):
-        SECRETS.update(value for value in (self.database_password, self.broker_password, self.app_password,
-                                           self.s3_access, self.s3_secret) if value)
+        SECRETS.update(value for value in (self.database_password, self.s3_access, self.s3_secret) if value)
         if self.session_cookie:
             SECRETS.add(self.session_cookie.split('=', 1)[1])
 
@@ -269,11 +267,6 @@ Vessel__Auth__OwnerName=E2E
 VESSEL_IDENTITY_ORIGIN={self.base}
 VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
 VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
-RABBITMQ_USER=vessel
-RABBITMQ_PASSWORD={self.broker_password}
-RABBITMQ_APP_USER=vessel-app
-RABBITMQ_APP_PASSWORD={self.app_password}
-VESSEL_RABBITMQ_MANAGEMENT_BIND=127.0.0.1:{self.broker_port}
 VESSEL_NETWORK_SUBNET={self.network}.0/24
 VESSEL_NETWORK_GATEWAY={self.network}.1
 VESSEL_WEB_IP={self.network}.10
@@ -332,7 +325,6 @@ services:
       # Every worker reads the identity owner directory, so it needs the same sign-in settings as the API.
       Vessel__Auth__OwnerId: ${{Vessel__Auth__OwnerId}}
       Vessel__Identity__Origins__0: ${{VESSEL_IDENTITY_ORIGIN}}
-      Vessel__Messaging__RabbitMqUri: "amqp://${{RABBITMQ_APP_USER}}:${{RABBITMQ_APP_PASSWORD}}@rabbitmq:5672/"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -344,10 +336,6 @@ services:
       start_period: 10s
       retries: 6
     restart: unless-stopped
-  rabbitmq:
-    environment:
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"
-      RABBITMQ_CTL_ERL_ARGS: "+S 1:1"
   web:
     image: {web}
     pull_policy: never
@@ -423,31 +411,13 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         return self.compose('exec', '-T', 'postgres', 'psql', '-U', 'vessel', '-d', 'vessel', '-qAt', '-F', '\t', '-c', query,
                             capture_output=True, text=True).stdout.strip()
 
-    def rabbit(self, *args):
-        # rabbitmqctl can answer 69 (node temporarily unavailable) on a busy host; retry briefly before failing.
-        for attempt in range(6):
-            result = self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', '--quiet', *args, '--formatter', 'json',
-                                  capture_output=True, text=True, check=False)
-            if result.returncode == 0:
-                return json.loads(result.stdout or '[]')
-            time.sleep(3)
-        raise StepFailed(f'rabbitmqctl {args[0]} failed ({result.returncode}): {result.stderr[-200:]}')
+    def listeners(self):
+        """The application names of the hosts' listening PostgreSQL connections (issue #99), one row each."""
+        return sorted(self.sql("SELECT application_name FROM pg_stat_activity WHERE application_name LIKE 'vessel-listen-%'").split())
 
-    def broker_app_user(self):
-        # Least privilege, as documented: the hosts can only use vessel.* names and declare nothing they need.
-        # rabbitmqctl reads the password from standard input, so it never appears in argv or process listings.
-        self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', 'add_user', 'vessel-app', input=self.app_password.encode(),
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', 'set_permissions', '-p', '/', 'vessel-app', '^vessel\\..*',
-                     '^(vessel\\..*|amq\\.default)$', '^vessel\\..*', stdout=subprocess.DEVNULL)
-
-    def topology(self):
-        queues = {q['name']: {**q, 'arguments': {a[0]: a[2] for a in q['arguments']}}
-                  for q in self.rabbit('list_queues', 'name', 'type', 'durable', 'arguments')}
-        exchanges = {x['name']: x for x in self.rabbit('list_exchanges', 'name', 'type', 'durable') if x['name'].startswith('vessel')}
-        bindings = sorted((b['source_name'], b['destination_name'], b['routing_key'])
-                          for b in self.rabbit('list_bindings', 'source_name', 'destination_name', 'routing_key') if b['source_name'])
-        return queues, exchanges, bindings
+    def terminate_listeners(self, *deployments):
+        names = ','.join(f"'vessel-listen-{name}'" for name in deployments)
+        return self.sql(f'SELECT count(*) FILTER (WHERE pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name IN ({names})')
 
     # ---- HTTP ----------------------------------------------------------------------------------------
 
@@ -639,10 +609,6 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.wait(lambda: all(self.receipts().get(i, [''])[0] == 'delivered' for i in ids), label, timeout)
         return True
 
-    def outbox(self):
-        return int(self.sql('SELECT (SELECT count(*) FROM wolverine_api.wolverine_outgoing_envelopes) + '
-                            '(SELECT count(*) FROM wolverine_monitor.wolverine_outgoing_envelopes)') or '0')
-
     def execution(self, play):
         return self.api(f'/api/plays/{play}/execution')
 
@@ -698,15 +664,10 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
             if run('docker', 'image', 'inspect', image, check=False, capture_output=True).returncode:
                 run('docker', 'pull', image, stdout=subprocess.DEVNULL)
         self.compose('config', '-q')
-        self.quiet('up', '-d', '--wait', 'postgres', 'rabbitmq', 'fake-venue')
-        queues, _, _ = self.topology()
-        self.expect(not any(name.startswith('vessel') for name in queues), 'empty broker before the explicit provision step')
+        self.quiet('up', '-d', '--wait', 'postgres', 'fake-venue')
         migrate = self.compose('run', '--rm', 'migrate', capture_output=True, text=True, check=False)
         output = migrate.stdout + migrate.stderr
         self.expect(migrate.returncode == 0, 'migrate runs the EF bundle and provision-messaging', output[-400:])
-        self.expect(all(schema in output for schema in ('wolverine_api', 'wolverine_monitor',
-                                                       'wolverine_notifications', 'wolverine_verification')),
-                    'provisioning prepares every deployment envelope schema', output[-300:])
         self.expect(subscription_report(output) == ({'notifications', 'verification'}, set()),
                     'notifications and verification subscriptions registered insert-only', output[-300:])
         self.expect(f'Ensured identity user {self.owner}.' in output, 'migrate ensures the configured owner as the operator', output[-300:])
@@ -715,29 +676,6 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
                              'bind-wallet', '--user', self.owner, '--address', self.operator_address(), '--label', 'E2E operator',
                              capture_output=True, text=True, check=False)
         self.expect(bound.returncode == 0, 'identity bind-wallet binds the synthetic operator EOA', (bound.stdout + bound.stderr)[-300:])
-        queues, exchanges, bindings = self.topology()
-        expected = {'vessel.commands.monitor', 'vessel.commands.monitor.dlq', 'vessel.events.sub.verification',
-                    'vessel.events.sub.verification.dlq', 'vessel.events.sub.notifications',
-                    'vessel.events.sub.notifications.dlq'}
-        self.expect(expected <= set(queues), 'provisioned queues exist', sorted(queues))
-        for name in ('vessel.commands.monitor', 'vessel.events.sub.verification', 'vessel.events.sub.notifications'):
-            arguments = queues[name]['arguments']
-            self.expect(queues[name]['type'] == 'quorum' and queues[name]['durable'], f'{name} is a durable quorum queue', queues[name])
-            self.expect(arguments.get('x-delivery-limit') == 20, f'{name} has delivery limit 20', arguments)
-            self.expect(bool(arguments.get('x-dead-letter-exchange')), f'{name} dead-letters to its DLX', arguments)
-        self.expect(exchanges.get('vessel.events', {}).get('type') == 'topic' and exchanges['vessel.events']['durable'],
-                    'vessel.events is a durable topic exchange', exchanges)
-        self.expect(('vessel.events', 'vessel.events.sub.verification', '#') in bindings,
-                    'verification subscription bound to every event type', bindings)
-        self.expect(('vessel.events', 'vessel.events.sub.notifications', '#') in bindings,
-                    'notifications subscription bound to every event type', bindings)
-        dead = {(s, d) for s, d, _ in bindings}
-        self.expect({('vessel.commands.monitor.dlx', 'vessel.commands.monitor.dlq'),
-                     ('vessel.events.sub.notifications.dlx', 'vessel.events.sub.notifications.dlq'),
-                     ('vessel.events.sub.verification.dlx', 'vessel.events.sub.verification.dlq')} <= dead,
-                    'each dead-letter exchange routes to its dead-letter queue', bindings)
-        before = self.topology()
-        self.broker_app_user()
         self.quiet('up', '-d', '--wait')
         self.ready()
         self.expect(self.request('/api/system', auth=False, headers={'Authorization': 'Bearer ' + secrets.token_hex(32)})[0] == 401,
@@ -754,12 +692,11 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.wait(lambda: self.api('/api/notifications/head')['workerOnline'], 'notifications heartbeat', 120)
         self.expect(self.sql("SELECT count(*) FROM server_notification_heartbeats WHERE deployment='notifications'") == '1',
                     'notifications worker records per-deployment health')
-        time.sleep(3)
-        self.expect(self.topology() == before, 'API and workers declared nothing at runtime (topology unchanged)')
-        self.expect(self.listening('listeners'), 'the worker consumes the command queue and the verifier its subscription', self.consumers())
-        deployments = self.sql('SELECT schema_name FROM messaging_deployments ORDER BY 1')
-        self.expect(deployments.split() == ['wolverine_api', 'wolverine_monitor', 'wolverine_notifications', 'wolverine_verification'],
-                    'messaging deployments recorded per schema', deployments)
+        self.expect(self.listening('listeners'), 'the monitor, notifications and verifier workers each listen on one connection; '
+                    'the API on none', self.listeners())
+        self.expect(self.sql("SELECT count(*) FROM information_schema.schemata WHERE schema_name LIKE 'wolverine%'") == '0' and
+                    self.sql('SELECT count(*) FROM messaging_deployments') == '0',
+                    'nothing but subscription registrations is provisioned: no envelope schema or deployment row')
         self.expect(self.request('/api/monitor', auth=False)[0] == 401, 'monitor API requires authentication')
         self.head_cursor = self.head()
         self.expect(self.head_cursor == '0' or CURSOR.fullmatch(self.head_cursor), 'head probe returns an opaque cursor', self.head_cursor)
@@ -1065,62 +1002,51 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         status, _, _ = self.request(f'/api/accounts/{self.account}/monitor/run', 'POST')
         self.expect(status == 409, 'Check on the idle account is 409', status)
 
-    def consumers(self):
-        return {q['name']: q['consumers'] for q in self.rabbit('list_queues', 'name', 'consumers')}
-
     def listening(self, label, timeout=90):
-        queues = ('vessel.commands.monitor', 'vessel.events.sub.verification', 'vessel.events.sub.notifications')
+        expected = ['vessel-listen-monitor', 'vessel-listen-notifications', 'vessel-listen-verification']
         try:
-            self.wait(lambda: all(self.consumers().get(q, 0) >= 1 for q in queues), label, timeout, 3)
+            self.wait(lambda: self.listeners() == expected, label, timeout, 3)
             return True
         except StepFailed:
             return False
 
-    def step_broker(self):
+    def step_listener(self):
+        """Issue #99: killed listening connections and a stopped subscriber only delay work; nothing is lost."""
         mark = self.head()
         self.p4 = self.create_play('E2E P4 BTC long', 'BTC', 'long', '100', [('95', '100')], [('110', '100')])
         self.p4_orders = {'entry': self.order('BTC', 'B', '100', '1'), 'stop': self.order('BTC', 'A', '95', '1', 'stop'),
                           'target': self.order('BTC', 'A', '110', '1', 'tp')}
-        self.quiet('stop', 'rabbitmq')
+        self.expect(self.terminate_listeners('monitor', 'verification') == '2', 'the worker and verifier listening connections are killed')
         self.status(self.p4, 'planned')
         accepted = self.check()
         request = accepted['requestId']
         found = self.wait_events(mark, lambda es: any(e['type'] == 'monitor.run-completed' and e['runId'] == request for e in es),
-                                 'run without the broker (command recovered from monitor_accounts)', 120)
-        self.expect(sum(e['type'] == 'execution.link-changed' for e in found) == 3, 'the worker linked P4 while RabbitMQ was down')
-        self.expect(True, 'the Check runs without the broker: the pending request is recovered from monitor_accounts')
-        self.expect(self.outbox() > 0, 'the outboxes hold the publications during the outage', self.outbox())
-        self.expect(self.request('/health/ready', auth=False)[0] == 200, 'API stays ready without the broker')
-        self.quiet('up', '-d', '--wait', 'rabbitmq')
-        self.wait(lambda: self.outbox() == 0, 'outbox drain', 150)
-        self.expect(True, 'the outboxes drain once the broker returns')
-        self.wait_delivered(found, 'receipts after the broker returned')
-        self.expect(True, 'every event of the outage reaches the verification subscription')
-        self.expect(self.listening('listeners after broker restart'), 'command and subscription listeners reconnect after a broker restart',
-                    self.consumers())
-        # Broker volume loss: an empty RabbitMQ without topology or the application user.
+                                 'Check after the listening connections were killed', 120)
+        self.expect(sum(e['type'] == 'execution.link-changed' for e in found) == 3, 'the worker linked P4')
+        self.expect(True, 'the Check runs: woken after reconnecting, or found by the scheduler in monitor_accounts')
+        self.expect(self.request('/health/ready', auth=False)[0] == 200, 'API stays ready')
+        self.wait_delivered(found, 'receipts after the listeners were killed')
+        self.expect(True, 'every event reaches the verification subscription: live after reconnecting, or by catch-up')
+        self.expect(self.listening('listeners after the kill'), 'the killed listening connections reconnect without a host restart',
+                    self.listeners())
+        # A stopped subscriber hears nothing; its catch-up from PostgreSQL delivers what it missed.
         mark = self.head()
-        self.quiet('rm', '-sfv', 'rabbitmq')
-        run('docker', 'volume', 'rm', f'{self.project}_rabbitmq', stdout=subprocess.DEVNULL)
-        self.quiet('up', '-d', '--wait', 'rabbitmq')
-        self.broker_app_user()
-        self.expect(not any(q.startswith('vessel') for q in self.topology()[0]), 'the recreated broker has no topology')
+        self.quiet('stop', 'verifier')
         self.control('fill', {'address': self.address, 'oid': self.p4_orders['entry']})
         self.wait(lambda: self.play(self.p4)['summary']['status'] == 'open', 'P4 open on a scheduled run', 150, 5)
         lost = self.events(mark)
-        self.expect(any(e['type'] == 'play.opened' for e in lost), 'events commit while the broker has no topology')
+        self.expect(any(e['type'] == 'play.opened' for e in lost), 'events commit while the subscriber is stopped')
+        self.expect(not any(self.receipts().get(e['id']) for e in lost), 'nobody settled them meanwhile')
         migrate = self.compose('run', '--rm', 'migrate', capture_output=True, text=True, check=False)
         self.expect(migrate.returncode == 0 and
                     subscription_report(migrate.stdout) == (set(), {'notifications', 'verification'}),
-                    're-provisioning restores the topology; registration stays insert-only', migrate.stdout[-300:])
-        self.wait_delivered(lost, 'catch-up after broker volume loss', 180)
-        self.expect(True, 'subscription catch-up from PostgreSQL delivers the events the empty broker missed')
-        self.wait(lambda: self.outbox() == 0, 'outbox drain after volume loss', 150)
-        self.expect(True, 'the outboxes drain after re-provisioning')
-        self.expect(self.listening('listeners after broker volume loss'), 'listeners resume on the re-provisioned queues without a host restart',
-                    self.consumers(), soft=True)
+                    'provisioning again leaves the registrations insert-only', migrate.stdout[-300:])
+        self.quiet('up', '-d', '--wait', 'verifier')
+        self.wait_delivered(lost, 'catch-up after the subscriber returned', 180)
+        self.expect(True, 'subscription catch-up from PostgreSQL delivers the events the stopped subscriber missed')
+        self.expect(self.listening('listeners after the subscriber returned'), 'the restarted verifier listens again', self.listeners())
         accepted, done, _ = self.checked(self.head())
-        self.expect(done['data']['outcome'] == 'succeeded', 'Checks complete after broker volume loss')
+        self.expect(done['data']['outcome'] == 'succeeded', 'Checks complete afterwards')
 
     def step_crash(self):
         self.quiet('up', '-d', '--wait', '--scale', 'worker=2', '--no-recreate', 'worker')
@@ -1233,7 +1159,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
             self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'rustfs', '-C', '/data', '-czf', '-', '.', stdout=out)
         self.quiet('down', '-v', '--remove-orphans')
         self.project = self.projects[1]
-        self.quiet('up', '-d', '--wait', 'postgres', 'rabbitmq', 'fake-venue')
+        self.quiet('up', '-d', '--wait', 'postgres', 'fake-venue')
         with (self.temp / 'vessel.dump').open('rb') as source:
             self.compose('exec', '-T', 'postgres', 'pg_restore', '-U', 'vessel', '-d', 'vessel', '--no-owner', '--no-privileges',
                          '--exit-on-error', stdin=source)
@@ -1250,7 +1176,6 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         rotated = self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'rotate-event-epoch',
                                capture_output=True, text=True)
         self.expect('Rotated the event stream epoch for 1 owner' in rotated.stdout, 'rotate-event-epoch before any host starts', rotated.stdout)
-        self.broker_app_user()
         self.quiet('run', '--rm', 'migrate')
         self.quiet('up', '-d', '--wait')
         self.ready()
@@ -1264,7 +1189,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.wait(lambda: any(s['state'] == 'reset' for s in self.sse.snapshot()[1]), 'SSE reset after restore', 60)
         self.expect(True, 'the long-lived SSE client reconnects with its old cursor and receives a reset status')
         summary = self.wait(lambda: (lambda s: s if s['workerOnline'] else None)(self.api('/api/monitor')), 'restored worker heartbeat', 120)
-        self.expect(summary['workerOnline'], 'restored worker heartbeat online without the old broker volume')
+        self.expect(summary['workerOnline'], 'restored worker heartbeat online')
         mark = self.head()
         self.expect(mark.split('.')[0] == page['nextCursor'].split('.')[0], 'new events use the rotated epoch')
         self.p5 = self.create_play('E2E P5 after restore', 'SOL', 'long', '150', [('140', '100')], [('170', '100')])
@@ -1380,8 +1305,8 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
 
     # ---- driver --------------------------------------------------------------------------------------
 
-    STATE = ('name', 'project', 'projects', 'owner', 'database_password', 'broker_password', 'app_password', 's3_access',
-             's3_secret', 'https_port', 'redirect_port', 'broker_port', 'control_port', 'network', 'address', 'wallet_address',
+    STATE = ('name', 'project', 'projects', 'owner', 'database_password', 's3_access',
+             's3_secret', 'https_port', 'redirect_port', 'control_port', 'network', 'address', 'wallet_address',
              'account', 'portfolio', 'p1', 'p2', 'p3',
              'p4', 'p5', 'p1_orders', 'p2_entry', 'p2_exit', 'p3_entry', 'p4_orders', 'ids', 'head_cursor', 'mark_browser')
 
@@ -1498,7 +1423,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         steps = [('1-deploy', self.step_deploy), ('2-account', self.step_account), ('3-link', self.step_link),
                  ('4-open', self.step_open), ('5-discrepancy', self.step_discrepancy), ('11a-browser-live', self.step_browser_live),
                  ('6-close', self.step_close), ('7-orphan-entry', self.step_orphan_entry), ('11b-browser-end', self.step_browser_ended),
-                 ('7b-recover', self.step_recover), ('8-broker', self.step_broker), ('9a-crash', self.step_crash),
+                 ('7b-recover', self.step_recover), ('8-listener', self.step_listener), ('9a-crash', self.step_crash),
                  ('9b-disable', self.step_disable), ('10a-admin', self.step_admin), ('10b-restore', self.step_restore),
                  ('10c-streams', self.step_streams)]
         status, failed = {}, False

@@ -15,13 +15,13 @@ public sealed class EnvironmentPrecedenceTests
         string? aspnet, string? dotnet, bool development)
     {
         // Child processes avoid mutating the shared test process's environment. Neither path opens a database:
-        // Development reaches the deliberate missing-connection/broker checks; Production refuses the owner first.
+        // Development reaches the deliberate missing-connection checks; Production refuses the owner first.
         var cli = await RunAsync(aspnet, dotnet, command: true);
         Assert.Equal(1, cli.ExitCode);
         Assert.Contains(development ? "ConnectionStrings:Vessel" : "Vessel:Auth:OwnerId", cli.Output);
         var host = await RunAsync(aspnet, dotnet, command: false);
         Assert.NotEqual(0, host.ExitCode);
-        Assert.Contains(development ? "Vessel:Messaging:RabbitMqUri" : "Vessel:Auth:OwnerId", host.Output);
+        Assert.Contains(development ? "ConnectionStrings:Vessel" : "Vessel:Auth:OwnerId", host.Output);
     }
 
     private static async Task<(int ExitCode, string Output)> RunAsync(string? aspnet, string? dotnet, bool command)
@@ -47,7 +47,7 @@ public sealed class EnvironmentPrecedenceTests
         {
             $"--Vessel:Auth:OwnerId={JournalOwner.Default}",
             "--Vessel:Identity:AllowLegacyDefaultOwner=false", "--Vessel:Identity:Origins:0=http://localhost",
-            "--ConnectionStrings:Vessel=", "--Vessel:Messaging:RabbitMqUri="
+            "--ConnectionStrings:Vessel="
         }) start.ArgumentList.Add(argument);
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync();

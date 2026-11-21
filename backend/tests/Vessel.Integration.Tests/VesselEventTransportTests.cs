@@ -1,14 +1,12 @@
 using System.Collections.Concurrent;
-using System.Data.Common;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
-using RabbitMQ.Client;
 using Vessel.Application.Events;
 using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
@@ -20,217 +18,243 @@ using Vessel.Messaging.Modules.Verification;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
-using Wolverine;
 using Vessel.Domain.Common;
+using Xunit.Abstractions;
 
 namespace Vessel.Tests;
 
 /// <summary>
-/// Pinned WolverineFx 6.50.0 against the CI RabbitMQ 4.3 image. Proves the inline listener settles every row of the
-/// plan's settlement table, that publishers know nothing about subscribers, and that catch-up from PostgreSQL
-/// recovers what the broker lost.
+/// Issue #99: live delivery through PostgreSQL <c>LISTEN/NOTIFY</c>. Proves the notification commits with the event,
+/// that live delivery settles every row of the settlement table, that publishers know nothing about subscribers, and
+/// that catch-up from PostgreSQL recovers what a lost notification or listening connection missed.
 /// </summary>
 [Collection("Monitor transport")]
-public sealed class VesselEventTransportTests
+public sealed class VesselEventTransportTests(ITestOutputHelper output)
 {
-    [VesselEventRabbitFact]
-    public async Task Event_and_outbox_commit_together_and_publish_once_to_a_verification_subscription()
+    [VesselEventPostgresFact]
+    public async Task Event_and_notification_commit_together_and_reach_a_verification_subscription_once()
     {
-        await using var broker = await BrokerScope.CreateAsync();
-        await broker.ProvisionAsync();
-        var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
-        await using var scope = api.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<VesselDbContext>();
-        var sink = scope.ServiceProvider.GetRequiredService<VesselEventStore>();
+        await using var scope = await DeliveryScope.CreateAsync();
+        await scope.ProvisionAsync();
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        Assert.Null(DeliveryScope.Listener(api));
+        await using var probe = await NotificationProbe.ListenAsync(scope.Database.ConnectionString, VesselNotifications.Events);
+        await using var services = api.Services.CreateAsyncScope();
+        var db = services.ServiceProvider.GetRequiredService<VesselDbContext>();
+        var sink = services.ServiceProvider.GetRequiredService<VesselEventStore>();
         var draft = Draft("transport-test");
         var rollback = true;
-        var verifyCommit = new CommitProbe { After = async () =>
+        var verifyStage = new CommitProbe { Before = () =>
         {
-            // Runs before the event participant's flush, but after the real UoW commit.
-            Assert.Equal(1, await broker.CountAsync("SELECT count(*) FROM events"));
-            Assert.Equal(1, await broker.CountAsync($"SELECT count(*) FROM {broker.Schema("api")}.wolverine_outgoing_envelopes"));
+            if (rollback) throw new InvalidOperationException("Synthetic rollback after the notification was staged.");
+            return Task.CompletedTask;
         }};
-        var verifyStage = new CommitProbe { Before = async () =>
-        {
-            Assert.Equal(1, await CountInTransaction(db, broker.Schema("api")));
-            Assert.Equal(0, await broker.CountAsync($"SELECT count(*) FROM {broker.Schema("api")}.wolverine_outgoing_envelopes"));
-            if (rollback) throw new InvalidOperationException("Synthetic rollback after durable staging.");
-        }};
-        var work = new UnitOfWork(db, [verifyCommit, sink, verifyStage]);
+        var work = new UnitOfWork(db, [sink, verifyStage]);
         await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(async () =>
         {
             await sink.AppendAsync(draft, default);
             return true;
         }, default));
-        Assert.Equal(0, await broker.CountAsync($"SELECT count(*) FROM {broker.Schema("api")}.wolverine_outgoing_envelopes"));
-        Assert.Equal(0, await broker.CountAsync("SELECT count(*) FROM events"));
+        // A rollback drops the staged notification with the event.
+        Assert.Empty(await probe.ReceiveAsync(TimeSpan.FromSeconds(1)));
+        Assert.Equal(0, await scope.CountAsync("SELECT count(*) FROM events"));
         rollback = false;
+        var worker = await scope.StartAsync(VerificationModule.ModuleName, VerificationModule.ModuleName);
         await work.ExecuteAsync(async () => { await sink.AppendAsync(draft, default); return true; }, default);
-        Assert.Null(verifyCommit.Error);
         var original = Assert.Single((await EventReads.ReadAsync(db, 0, 200, default)).Events);
-        // Publication wrote no per-subscriber rows; the subscription's receipt is the subscriber's own record.
-        Assert.Equal(0, await broker.CountAsync("SELECT count(*) FROM event_receipts"));
-        await broker.StartAsync(VerificationModule.ModuleName, VerificationModule.ModuleName);
-        await broker.EventuallyAsync(async () => await broker.ReceiptAsync(VerificationModule.SubscriptionName, original.Id) == ("delivered", 1));
-        // A duplicate transport envelope with the SAME business event ID is acknowledged without a second effect.
-        var outbox = scope.ServiceProvider.GetRequiredService<IVesselEventOutbox>();
-        await work.ExecuteAsync(async () => { await outbox.StageAsync(original, default); return true; }, default);
-        await broker.EventuallyAsync(async () =>
-            await broker.CountAsync($"SELECT count(*) FROM {broker.Schema("api")}.wolverine_outgoing_envelopes") == 0);
-        await Task.Delay(500);
-        Assert.Equal(("delivered", 1), await broker.ReceiptAsync(VerificationModule.SubscriptionName, original.Id));
+        Assert.Equal([VesselNotifications.EventPayload(original)], await probe.ReceiveAsync(TimeSpan.FromSeconds(5)));
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync(VerificationModule.SubscriptionName, original.Id) == ("delivered", 1));
+        // Publication wrote no per-subscriber rows; the only receipt is the subscription's own record.
+        Assert.Equal(1, await scope.CountAsync("SELECT count(*) FROM event_receipts"));
+        // A repeated notification with the SAME business event ID is answered as settled, without a second effect.
+        await scope.NotifyAsync(VesselNotifications.Events, VesselNotifications.EventPayload(original));
+        var barrier = await scope.AppendAsync(api, Draft("barrier"));
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync(VerificationModule.SubscriptionName, barrier.Id) == ("delivered", 1));
+        Assert.Equal(("delivered", 1), await scope.ReceiptAsync(VerificationModule.SubscriptionName, original.Id));
+        Assert.Equal(1, DeliveryScope.Listener(worker)!.Connections);
     }
 
-    [VesselEventRabbitFact]
-    public async Task Inline_listener_settles_every_row_of_the_settlement_table()
+    [VesselEventPostgresFact]
+    public async Task Live_delivery_settles_every_row_of_the_settlement_table()
     {
         var scripted = new ScriptedModule("scripted", new() { MaxAttempts = 2 });
-        await using var broker = await BrokerScope.CreateAsync(scripted);
-        await broker.ProvisionAsync();
-        var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
-        var worker = await broker.StartAsync("scripted", "scripted");
-        var ok = await broker.AppendAsync(api, Draft("ok"));
-        var retry = await broker.AppendAsync(api, Draft("retry"));
-        var terminal = await broker.AppendAsync(api, Draft("terminal"));
-        // Success: effects and terminal receipt commit together. Retryable: the attempt is recorded and acked.
-        // Terminal: the receipt commits failed and the delivery is dead-lettered.
-        await broker.EventuallyAsync(async () => await broker.ReceiptAsync("scripted", ok.Id) == ("delivered", 1) &&
-            await broker.ReceiptAsync("scripted", retry.Id) == ("pending", 1) &&
-            await broker.ReceiptAsync("scripted", terminal.Id) == ("failed", 1));
-        Assert.True(await broker.CountAsync($"SELECT count(*) FROM event_receipts WHERE event_id='{retry.Id}' AND next_attempt_at>now()") == 1);
+        await using var scope = await DeliveryScope.CreateAsync(scripted);
+        await scope.ProvisionAsync();
+        var logs = new BackgroundWorkLogs();
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        await scope.StartAsync("scripted", ["scripted"], logs);
+        var ok = await scope.AppendAsync(api, Draft("ok"));
+        var retry = await scope.AppendAsync(api, Draft("retry"));
+        var terminal = await scope.AppendAsync(api, Draft("terminal"));
+        // Success: effects and terminal receipt commit together. Retryable: the attempt is recorded. Terminal: the
+        // receipt commits failed and the outcome is logged.
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync("scripted", ok.Id) == ("delivered", 1) &&
+            await scope.ReceiptAsync("scripted", retry.Id) == ("pending", 1) &&
+            await scope.ReceiptAsync("scripted", terminal.Id) == ("failed", 1));
+        Assert.True(await scope.CountAsync($"SELECT count(*) FROM event_receipts WHERE event_id='{retry.Id}' AND next_attempt_at>now()") == 1);
 
-        // Invalid owner and unknown event (claiming a below-floor sequence): no receipt, dead-lettered.
-        var bus = api.Services.GetRequiredService<IMessageBus>();
-        await bus.BroadcastToTopicAsync(ok.Type, ok with { Id = Guid.CreateVersion7(), OwnerId = Guid.NewGuid() });
-        var unknown = ok with { Id = Guid.CreateVersion7(), Sequence = "0" };
-        await bus.BroadcastToTopicAsync(unknown.Type, unknown);
-        // Known historical: a pruned event keeps its dedup identity, so its late duplicate is acknowledged.
-        await broker.ExecuteAsync($"DELETE FROM events WHERE event_id='{ok.Id}'");
-        await bus.BroadcastToTopicAsync(ok.Type, ok);
-        // Already settled: a duplicate of the failed delivery is acknowledged and changes nothing.
-        await bus.BroadcastToTopicAsync(terminal.Type, terminal);
-        var queue = broker.Topology.SubscriptionQueue("scripted");
-        await broker.EventuallyAsync(async () => await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)) == 3);
-        await Task.Delay(500);
-        await worker.StopAsync();
-        // Stopping the consumer returns any unacknowledged delivery to the queue; nothing was left unsettled.
-        Assert.Equal(0u, await broker.ReadyAsync(queue));
-        Assert.Equal(3u, await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)));
-        Assert.Equal(0, await broker.CountAsync($"SELECT count(*) FROM event_receipts WHERE event_id IN ('{ok.Id}','{unknown.Id}')"));
-        Assert.Equal(("failed", 1), await broker.ReceiptAsync("scripted", terminal.Id));
-        Assert.Equal(("pending", 1), await broker.ReceiptAsync("scripted", retry.Id));
+        // Invalid owner and unknown event: no receipt, logged. Garbage is logged and ignored.
+        var foreign = ok with { Id = Guid.CreateVersion7(), OwnerId = Guid.NewGuid() };
+        await scope.NotifyAsync(VesselNotifications.Events, VesselNotifications.EventPayload(foreign));
+        var unknown = ok with { Id = Guid.CreateVersion7() };
+        await scope.NotifyAsync(VesselNotifications.Events, VesselNotifications.EventPayload(unknown));
+        await scope.NotifyAsync(VesselNotifications.Events, "not a notification");
+        // Known historical: a pruned event keeps its dedup identity, so its late duplicate changes nothing.
+        await scope.ExecuteAsync($"DELETE FROM events WHERE event_id='{ok.Id}'");
+        await scope.NotifyAsync(VesselNotifications.Events, VesselNotifications.EventPayload(ok));
+        // Already settled: a duplicate of the failed delivery changes nothing.
+        await scope.NotifyAsync(VesselNotifications.Events, VesselNotifications.EventPayload(terminal));
+        // Notifications of one channel are handled in order, so a later delivery is a barrier.
+        var barrier = await scope.AppendAsync(api, Draft("barrier"));
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync("scripted", barrier.Id) == ("delivered", 1));
+        Assert.Equal(0, await scope.CountAsync($"SELECT count(*) FROM event_receipts WHERE event_id IN ('{foreign.Id}','{unknown.Id}')"));
+        Assert.Equal(("failed", 1), await scope.ReceiptAsync("scripted", terminal.Id));
+        Assert.Equal(("pending", 1), await scope.ReceiptAsync("scripted", retry.Id));
         Assert.Equal(1, scripted.Subscriber.Calls(terminal.Id));
-
-        // Redriving the dead letters never reopens a receipt: the failed one is acked as settled, the others
-        // dead-letter again because they are still not ours.
-        await broker.RedriveAsync(queue);
-        worker = await broker.StartAsync("scripted", "scripted");
-        await broker.EventuallyAsync(async () => await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)) == 2);
-        await Task.Delay(500);
-        await worker.StopAsync();
-        Assert.Equal(0u, await broker.ReadyAsync(queue));
-        Assert.Equal(("failed", 1), await broker.ReceiptAsync("scripted", terminal.Id));
-        Assert.Equal(1, scripted.Subscriber.Calls(terminal.Id));
+        Assert.Equal(0, scripted.Subscriber.Calls(foreign.Id) + scripted.Subscriber.Calls(unknown.Id));
+        var warnings = logs.Messages.Where(m => m.Level == LogLevel.Warning).Select(m => m.Text).ToArray();
+        Assert.Contains(warnings, t => t.Contains(terminal.Id.ToString(), StringComparison.Ordinal) && t.Contains("Failed", StringComparison.Ordinal));
+        Assert.Contains(warnings, t => t.Contains(foreign.Id.ToString(), StringComparison.Ordinal) && t.Contains("unknown owner", StringComparison.Ordinal));
+        Assert.Contains(warnings, t => t.Contains(unknown.Id.ToString(), StringComparison.Ordinal) && t.Contains("Unknown", StringComparison.Ordinal));
+        Assert.Contains(warnings, t => t.Contains("could not be read", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, t => t.Contains(ok.Id.ToString(), StringComparison.Ordinal));
     }
 
-    [VesselEventRabbitFact]
-    public async Task Catch_up_recovers_an_unroutable_publish_and_a_lost_queue_from_postgresql()
+    [VesselEventPostgresFact]
+    public async Task Catch_up_recovers_events_whose_notification_no_listener_received()
     {
         var scripted = new ScriptedModule("recovering", new() { DiscoveryGrace = TimeSpan.Zero });
-        await using var broker = await BrokerScope.CreateAsync(scripted);
-        await broker.ProvisionAsync();
-        var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
-        var queue = broker.Topology.SubscriptionQueue("recovering");
-        // A topic with no binding acknowledges the publish and drops it: no longer a loss, only latency.
-        await broker.ChannelAsync(channel => channel.QueueUnbindAsync(queue, broker.Topology.EventExchange, "#"));
-        var unroutable = await broker.AppendAsync(api, Draft("unroutable"));
-        await broker.EventuallyAsync(async () =>
-            await broker.CountAsync($"SELECT count(*) FROM {broker.Schema("api")}.wolverine_outgoing_envelopes") == 0);
-        Assert.Equal(0u, await broker.ReadyAsync(queue));
-        await broker.ChannelAsync(channel => channel.QueueBindAsync(queue, broker.Topology.EventExchange, "#"));
-        var purged = await broker.AppendAsync(api, Draft("purged"));
-        await broker.EventuallyAsync(async () => await broker.ReadyAsync(queue) == 1);
-        await broker.ChannelAsync(channel => channel.QueuePurgeAsync(queue));
-        Assert.Empty(await broker.ReceiptsAsync("recovering"));
+        await using var scope = await DeliveryScope.CreateAsync(scripted);
+        await scope.ProvisionAsync();
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        // Nobody listens: the notification is gone, the event is not.
+        var unheard = await scope.AppendAsync(api, Draft("unheard"));
+        var worker = await scope.StartAsync("recovering", "recovering");
+        // A stopped listener misses notifications too.
+        await DeliveryScope.Listener(worker)!.StopAsync(default);
+        var stopped = await scope.AppendAsync(api, Draft("stopped"));
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.Empty(await scope.ReceiptsAsync("recovering"));
 
-        // The worker was down for both. Its catch-up pass dispatches them through the same dispatcher.
-        var worker = await broker.StartAsync("recovering", "recovering");
-        await using var scope = worker.Services.CreateAsyncScope();
-        var result = await scope.ServiceProvider.GetRequiredService<EventCatchUp>()
-            .RunAsync(scripted.Subscriptions[0], default);
+        // Catch-up dispatches both through the same dispatcher.
+        await using var services = worker.Services.CreateAsyncScope();
+        var result = await services.ServiceProvider.GetRequiredService<EventCatchUp>().RunAsync(scripted.Subscriptions[0], default);
         Assert.Equal(2, result.Discovered);
-        Assert.Equal(("delivered", 1), await broker.ReceiptAsync("recovering", unroutable.Id));
-        Assert.Equal(("delivered", 1), await broker.ReceiptAsync("recovering", purged.Id));
-        Assert.Equal(long.Parse(purged.Sequence), result.LowWaterMark);
+        Assert.Equal(("delivered", 1), await scope.ReceiptAsync("recovering", unheard.Id));
+        Assert.Equal(("delivered", 1), await scope.ReceiptAsync("recovering", stopped.Id));
+        Assert.Equal(long.Parse(stopped.Sequence), result.LowWaterMark);
     }
 
-    [VesselEventRabbitFact]
+    [VesselEventPostgresFact]
+    public async Task A_killed_listening_connection_reconnects_and_live_delivery_resumes()
+    {
+        var scripted = new ScriptedModule("reconnecting", new() { DiscoveryGrace = TimeSpan.Zero });
+        await using var scope = await DeliveryScope.CreateAsync(scripted);
+        await scope.ProvisionAsync();
+        var logs = new BackgroundWorkLogs();
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        var worker = await scope.StartAsync("reconnecting", ["reconnecting"], logs);
+        var listener = DeliveryScope.Listener(worker)!;
+        var killed = listener.ProcessId;
+        Assert.Equal(1, await scope.CountAsync(
+            $"SELECT count(*) FROM pg_stat_activity WHERE pid={killed} AND application_name='vessel-listen-reconnecting'"));
+        Assert.True(await scope.TerminateAsync(killed));
+        // Appended while the listener is away (it waits a second before reconnecting): live or by catch-up, never lost.
+        await scope.EventuallyAsync(() => Task.FromResult(listener.ProcessId != killed));
+        var during = await scope.AppendAsync(api, Draft("during"));
+        await scope.EventuallyAsync(() => Task.FromResult(listener.ProcessId is not 0 && listener.ProcessId != killed));
+        Assert.Equal(2, listener.Connections);
+        var after = await scope.AppendAsync(api, Draft("after"));
+        var clock = Stopwatch.StartNew();
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync("reconnecting", after.Id) == ("delivered", 1));
+        Assert.InRange(clock.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(5));
+        await using (var services = worker.Services.CreateAsyncScope())
+            await services.ServiceProvider.GetRequiredService<EventCatchUp>().RunAsync(scripted.Subscriptions[0], default);
+        Assert.Equal(("delivered", 1), await scope.ReceiptAsync("reconnecting", during.Id));
+        // Only the type is logged, never the driver's message (which can name the host).
+        var lost = Assert.Single(logs.Messages, m => m.Text.Contains("lost its PostgreSQL connection", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Warning, lost.Level);
+        Assert.Null(lost.Exception);
+    }
+
+    [VesselEventPostgresFact]
+    public async Task A_notification_wakes_live_delivery_well_before_catch_up_could()
+    {
+        // No maintenance runs in these hosts, and the default discovery grace is 30 s: only the notification can deliver.
+        await using var scope = await DeliveryScope.CreateAsync();
+        await scope.ProvisionAsync();
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        await scope.StartAsync(VerificationModule.ModuleName, VerificationModule.ModuleName);
+        var latencies = new List<TimeSpan>();
+        for (var i = 0; i < 20; i++)
+        {
+            var clock = Stopwatch.StartNew();
+            var appended = await scope.AppendAsync(api, Draft("latency-" + i));
+            while (await scope.ReceiptAsync(VerificationModule.SubscriptionName, appended.Id) != ("delivered", 1))
+            {
+                Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), "The notification did not deliver the event.");
+                await Task.Delay(10);
+            }
+            latencies.Add(clock.Elapsed);
+        }
+        var p95 = latencies.Order().ElementAt(18);
+        output.WriteLine($"append to delivered receipt: median {latencies.Order().ElementAt(10)}, p95 {p95}, max {latencies.Max()}");
+        Assert.True(p95 < TimeSpan.FromSeconds(2), $"p95 {p95}");
+    }
+
+    [VesselEventPostgresFact]
     public async Task Owner_link_in_the_api_reaches_the_verification_subscription()
     {
-        await using var broker = await BrokerScope.CreateAsync();
-        await broker.ProvisionAsync();
-        var account = new Account(Guid.NewGuid(), broker.Owner, "hyperliquid", "Synthetic", TradingMode.Real);
+        await using var scope = await DeliveryScope.CreateAsync();
+        await scope.ProvisionAsync();
+        var account = new Account(Guid.NewGuid(), scope.Owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
-        await using (var seed = broker.Database.Context(broker.Owner))
+        await using (var seed = scope.Database.Context(scope.Owner))
         {
             seed.Accounts.Add(account); seed.Plays.Add(play);
             seed.Orders.Add(TestOrders.For(play, "order-1", status: "open"));
             await seed.SaveChangesAsync();
         }
-        var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
-        await broker.StartAsync(VerificationModule.ModuleName, VerificationModule.ModuleName);
-        await using (var scope = api.Services.CreateAsyncScope())
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        await scope.StartAsync(VerificationModule.ModuleName, VerificationModule.ModuleName);
+        await using (var services = api.Services.CreateAsyncScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<VesselDbContext>();
-            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+            var db = services.ServiceProvider.GetRequiredService<VesselDbContext>();
+            await services.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
             {
                 db.OrderLinks.Add(new(await db.Plays.SingleAsync(), await db.Orders.SingleAsync(), OrderLinkRole.Entry, "entry-1", null,
                     OrderLinkState.Linked, OrderLinkSource.Owner, DateTimeOffset.UtcNow));
                 return true;
             }, default);
         }
-        await using var reader = broker.Database.Context(broker.Owner);
+        await using var reader = scope.Database.Context(scope.Owner);
         var linked = Assert.Single((await EventReads.ReadAsync(reader, 0, 200, default)).Events);
         Assert.Equal("execution.link-changed", linked.Type);
-        await broker.EventuallyAsync(async () => await broker.ReceiptAsync(VerificationModule.SubscriptionName, linked.Id) == ("delivered", 1));
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync(VerificationModule.SubscriptionName, linked.Id) == ("delivered", 1));
     }
 
-    [VesselEventRabbitFact]
-    public async Task Envelope_storage_exists_only_after_explicit_provisioning()
+    [VesselEventPostgresFact]
+    public async Task Provisioning_only_registers_subscriptions_and_is_insert_only()
     {
-        await using var broker = await BrokerScope.CreateAsync();
-        using var api = broker.Build(MessagingHosting.ApiDeployment);
-        await Assert.ThrowsAnyAsync<Exception>(() => api.StartAsync());
-        Assert.Equal(0, await broker.CountAsync($"SELECT count(*) FROM information_schema.schemata WHERE schema_name='{broker.Schema("api")}'"));
-        var provisioned = await broker.ProvisionAsync();
-        Assert.Contains(broker.Schema("api"), provisioned.Schemas);
+        await using var scope = await DeliveryScope.CreateAsync();
+        var provisioned = await scope.ProvisionAsync();
         Assert.Equal([VerificationModule.SubscriptionName], provisioned.Registered);
-        // Provisioning is insert-only: a second run keeps the registration and its progress.
-        Assert.Equal([VerificationModule.SubscriptionName], (await broker.ProvisionAsync()).Existing);
-        using var started = broker.Build(MessagingHosting.ApiDeployment);
-        await started.StartAsync();
-        await started.StopAsync();
+        // A second run keeps the registration and its progress.
+        Assert.Equal([VerificationModule.SubscriptionName], (await scope.ProvisionAsync()).Existing);
+        // Nothing else exists: no envelope schema, no deployment registration.
+        Assert.Equal(0, await scope.CountAsync("SELECT count(*) FROM messaging_deployments"));
+        Assert.Equal(0, await scope.CountAsync("SELECT count(*) FROM information_schema.schemata WHERE schema_name LIKE 'wolverine%'"));
     }
 
     private static VesselEventDraft Draft(string key) => new("monitor.state-changed", Guid.CreateVersion7(), key,
         "info", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new(), new("owner"),
         JsonSerializer.SerializeToElement(new { previous = "idle", current = "live" }));
 
-    private static async Task<long> CountInTransaction(VesselDbContext db, string schema)
-    {
-        await using DbCommand command = db.Database.GetDbConnection().CreateCommand();
-        command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
-        command.CommandText = $"SELECT count(*) FROM {schema}.wolverine_outgoing_envelopes";
-        return Convert.ToInt64(await command.ExecuteScalarAsync());
-    }
-
     private sealed class CommitProbe : IUnitOfWorkParticipant
     {
         public Func<Task> Before { get; init; } = () => Task.CompletedTask;
-        public Func<Task> After { get; init; } = () => Task.CompletedTask;
-        public Exception? Error { get; private set; }
         public Task BeforeCommitAsync(CancellationToken ct) => Before();
-        public async Task AfterCommitAsync(CancellationToken ct) => Error = await Record.ExceptionAsync(After);
+        public Task AfterCommitAsync(CancellationToken ct) => Task.CompletedTask;
         public Task RollbackAsync(CancellationToken ct) => Task.CompletedTask;
     }
 }
@@ -270,28 +294,60 @@ internal sealed class ScriptedSubscriber : IVesselEventSubscriber
     }
 }
 
-/// <summary>A disposable database, broker namespace and envelope schemas for one test.</summary>
-internal sealed class BrokerScope : IAsyncDisposable
+/// <summary>A raw <c>LISTEN</c> on one Vessel channel of a test schema, outside any Vessel host.</summary>
+internal sealed class NotificationProbe : IAsyncDisposable
+{
+    private readonly NpgsqlConnection connection;
+    private readonly ConcurrentQueue<string> payloads = new();
+
+    private NotificationProbe(NpgsqlConnection connection)
+    {
+        this.connection = connection;
+        connection.Notification += (_, e) => payloads.Enqueue(e.Payload);
+    }
+
+    public static async Task<NotificationProbe> ListenAsync(string connectionString, string name)
+    {
+        var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        var probe = new NotificationProbe(connection);
+        await using var resolve = new NpgsqlCommand($"SELECT {VesselNotifications.ChannelSql}", connection);
+        resolve.Parameters.AddWithValue("channel", name);
+        var channel = (string)(await resolve.ExecuteScalarAsync())!;
+        await using var listen = new NpgsqlCommand($"LISTEN \"{channel}\"", connection);
+        await listen.ExecuteNonQueryAsync();
+        return probe;
+    }
+
+    /// <summary>Everything received within <paramref name="wait"/>, returning as soon as something arrived.</summary>
+    public async Task<string[]> ReceiveAsync(TimeSpan wait)
+    {
+        if (payloads.IsEmpty) await connection.WaitAsync(wait);
+        // Anything sent together arrives together; drain what is already buffered.
+        while (await connection.WaitAsync(TimeSpan.FromMilliseconds(100))) { }
+        var received = new List<string>();
+        while (payloads.TryDequeue(out var payload)) received.Add(payload);
+        return received.ToArray();
+    }
+
+    public ValueTask DisposeAsync() => connection.DisposeAsync();
+}
+
+/// <summary>A disposable database for one test; hosts listen on its schema's own channels.</summary>
+internal sealed class DeliveryScope : IAsyncDisposable
 {
     private readonly List<IHost> hosts = [];
-    private readonly string id = Guid.NewGuid().ToString("N")[..12];
-    private BrokerScope(CoreDatabase database, IVesselModule[] modules)
+    private DeliveryScope(CoreDatabase database, IVesselModule[] modules)
     {
         Database = database;
         Owners = new ConfiguredOwnerDirectory(Owner);
         Registry = new([new MonitorModule(), new VerificationModule(), .. modules]);
-        var values = new Dictionary<string, string?>
+        Configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Vessel"] = database.ConnectionString,
             ["Vessel:Auth:OwnerId"] = Owner.ToString(),
-            ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
-            ["Vessel:Messaging:RabbitMqUri"] = Environment.GetEnvironmentVariable("Vessel_TEST_EVENT_RABBIT"),
-            ["Vessel:Messaging:Prefix"] = "vt" + id
-        };
-        foreach (var deployment in new[] { MessagingHosting.ApiDeployment }.Concat(Registry.Modules.Select(m => m.Name)))
-            values[$"Vessel:Messaging:StorageSchemas:{deployment}"] = Schema(deployment);
-        Configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
-        Topology = new(MessagingHosting.Settings(Configuration), Registry);
+            ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin
+        }).Build();
     }
 
     public IJournalOwnerDirectory Owners { get; set; }
@@ -299,17 +355,16 @@ internal sealed class BrokerScope : IAsyncDisposable
     public Guid Owner { get; } = Guid.NewGuid();
     public VesselModuleRegistry Registry { get; }
     public IConfiguration Configuration { get; }
-    public MessagingTopology Topology { get; }
-    public string Schema(string deployment) => $"vt_{deployment.Replace('-', '_')}_{id}";
 
-    public static async Task<BrokerScope> CreateAsync(params IVesselModule[] modules) =>
+    public static async Task<DeliveryScope> CreateAsync(params IVesselModule[] modules) =>
         new(await CoreDatabase.CreateAsync(), modules);
 
     public Task<ProvisioningResult> ProvisionAsync() => MessagingProvisioning.ProvisionAsync(Configuration, default, Registry);
 
-    public IHost Build(string deployment, params string[] run) => Build(deployment, run, logs: null);
+    public static PostgresNotificationListener? Listener(IHost host) =>
+        host.Services.GetServices<IHostedService>().OfType<PostgresNotificationListener>().SingleOrDefault();
 
-    public IHost Build(string deployment, string[] run, ILoggerProvider? logs)
+    public IHost Build(string deployment, string[] run, ILoggerProvider? logs = null)
     {
         var builder = Host.CreateApplicationBuilder([]);
         builder.Configuration.Sources.Clear();
@@ -326,10 +381,14 @@ internal sealed class BrokerScope : IAsyncDisposable
         return host;
     }
 
-    public async Task<IHost> StartAsync(string deployment, params string[] run)
+    public Task<IHost> StartAsync(string deployment, params string[] run) => StartAsync(deployment, run, null);
+
+    /// <summary>Starts a host and, if it listens, waits until its listening connection is subscribed.</summary>
+    public async Task<IHost> StartAsync(string deployment, string[] run, ILoggerProvider? logs)
     {
-        var host = Build(deployment, run);
+        var host = Build(deployment, run, logs);
         await host.StartAsync();
+        if (Listener(host) is { } listener) await EventuallyAsync(() => Task.FromResult(listener.Connections > 0));
         return host;
     }
 
@@ -344,6 +403,26 @@ internal sealed class BrokerScope : IAsyncDisposable
         }, default);
         await using var db = Database.Context(ownerId ?? Owner);
         return (await EventReads.ReadAsync(db, 0, 200, default)).Events.Single(e => e.DedupKey == draft.DedupKey);
+    }
+
+    /// <summary>Sends a raw notification on one of this schema's Vessel channels, as a stray or repeated signal would.</summary>
+    public async Task NotifyAsync(string channel, string payload)
+    {
+        await using var connection = new NpgsqlConnection(Database.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand($"SELECT pg_notify({VesselNotifications.ChannelSql}, @payload)", connection);
+        command.Parameters.AddWithValue("channel", channel);
+        command.Parameters.AddWithValue("payload", payload);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task<bool> TerminateAsync(int processId)
+    {
+        await using var connection = new NpgsqlConnection(Database.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT pg_terminate_backend(@pid)", connection);
+        command.Parameters.AddWithValue("pid", processId);
+        return (bool)(await command.ExecuteScalarAsync())!;
     }
 
     public async Task<(string State, int Attempts)?> ReceiptAsync(string subscription, Guid eventId)
@@ -386,32 +465,6 @@ internal sealed class BrokerScope : IAsyncDisposable
         await command.ExecuteNonQueryAsync();
     }
 
-    public async Task ChannelAsync(Func<IChannel, Task> action)
-    {
-        var factory = new ConnectionFactory { Uri = new(Environment.GetEnvironmentVariable("Vessel_TEST_EVENT_RABBIT")!) };
-        await using var connection = await factory.CreateConnectionAsync();
-        await using var channel = await connection.CreateChannelAsync();
-        await action(channel);
-    }
-
-    public async Task<uint> ReadyAsync(string queue)
-    {
-        uint count = 0;
-        await ChannelAsync(async channel => count = (await channel.QueueDeclarePassiveAsync(queue)).MessageCount);
-        return count;
-    }
-
-    /// <summary>Moves every dead letter back onto its queue with its original body and headers.</summary>
-    public Task RedriveAsync(string queue) => ChannelAsync(async channel =>
-    {
-        while (await channel.BasicGetAsync(MessagingTopology.DeadLetterQueue(queue), autoAck: false) is { } message)
-        {
-            var properties = new BasicProperties(message.BasicProperties);
-            await channel.BasicPublishAsync("", queue, mandatory: true, properties, message.Body);
-            await channel.BasicAckAsync(message.DeliveryTag, multiple: false);
-        }
-    });
-
     public async Task EventuallyAsync(Func<Task<bool>> condition)
     {
         for (var attempt = 0; attempt < 120; attempt++)
@@ -419,7 +472,7 @@ internal sealed class BrokerScope : IAsyncDisposable
             if (await condition()) return;
             await Task.Delay(250);
         }
-        Assert.Fail("The disposable broker did not reach the expected state.");
+        Assert.Fail("The disposable database did not reach the expected state.");
     }
 
     public async ValueTask DisposeAsync()
@@ -429,33 +482,6 @@ internal sealed class BrokerScope : IAsyncDisposable
             try { await host.StopAsync(); } catch { }
             host.Dispose();
         }
-        try
-        {
-            await ChannelAsync(async channel =>
-            {
-                var queues = Registry.Modules.SelectMany(m => m.Subscriptions).Select(s => Topology.SubscriptionQueue(s.Name))
-                    .Concat(Registry.Modules.SelectMany(m => m.Commands).Select(c => Topology.CommandQueue(c.Name)));
-                foreach (var queue in queues)
-                {
-                    await channel.QueueDeleteAsync(queue, false, false);
-                    await channel.QueueDeleteAsync(MessagingTopology.DeadLetterQueue(queue), false, false);
-                    await channel.ExchangeDeleteAsync(MessagingTopology.DeadLetterExchange(queue), false);
-                }
-                await channel.ExchangeDeleteAsync(Topology.EventExchange, false);
-            });
-        }
-        finally
-        {
-            await using (var connection = new NpgsqlConnection(Database.ConnectionString))
-            {
-                await connection.OpenAsync();
-                foreach (var deployment in new[] { MessagingHosting.ApiDeployment }.Concat(Registry.Modules.Select(m => m.Name)))
-                {
-                    await using var drop = new NpgsqlCommand($"DROP SCHEMA IF EXISTS {Schema(deployment)} CASCADE", connection);
-                    await drop.ExecuteNonQueryAsync();
-                }
-            }
-            await Database.DisposeAsync();
-        }
+        await Database.DisposeAsync();
     }
 }

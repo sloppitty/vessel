@@ -1,6 +1,6 @@
 namespace Vessel.Application.Ownership;
 
-/// <summary>How background work treats an owner. Unknown means no such user: its messages are dead-lettered.</summary>
+/// <summary>How background work treats an owner. Unknown means no such user: its messages are dropped and logged.</summary>
 public enum JournalOwnerStatus
 {
     Unknown,

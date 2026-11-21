@@ -5,7 +5,7 @@ using Vessel.Application.Events;
 
 namespace Vessel.Persistence.Events;
 
-// Read/SSE paths never resolve the outbox, runtime, broker or a mutation boundary.
+// Read/SSE paths never resolve the outbox, a listener or a mutation boundary.
 public sealed class VesselEventHistory(VesselDbContext db) : IVesselEventReader
 {
     public async Task<VesselEventPage> ReadAsync(string? cursor, int limit, CancellationToken cancellationToken)

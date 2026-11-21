@@ -28,7 +28,7 @@ October 17, 2026:
 - **Timed popups.** Every popup closes by itself after a timer, because the notification remains on the page. Critical popups stay longer than warnings, and warnings longer than information.
 - **Recommendations accepted for now.** The eight decisions listed under [Decisions](#decisions) follow the recommendations, to be revisited after the owner has seen the feature running.
 
-Unchanged rules from the monitor: PostgreSQL is the record and RabbitMQ is transport; owner scope everywhere; exact decimal strings; no secrets or venue messages in logs or messages; migrations are explicit and never run at startup; tests never touch the owner's database; themes change colours and radius only, and the approved section positions stay.
+Unchanged rules from the monitor: PostgreSQL is the record and RabbitMQ is transport (November 20, 2026, issue #99: superseded; PostgreSQL `LISTEN/NOTIFY` is the transport and there is no broker, see [messaging and workers](messaging-and-workers.md#transport)); owner scope everywhere; exact decimal strings; no secrets or venue messages in logs or messages; migrations are explicit and never run at startup; tests never touch the owner's database; themes change colours and radius only, and the approved section positions stay.
 
 ## What already exists
 

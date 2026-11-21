@@ -17,7 +17,6 @@ using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
 using Vessel.Persistence.Notifications;
 using Vessel.Worker;
-using Wolverine;
 using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
@@ -88,7 +87,7 @@ public sealed class NotificationOwnerTests
     }
 
     [VesselEventPostgresFact]
-    public async Task Suspended_delivery_has_no_receipt_and_catches_up_after_restore_unknown_owner_dead_letters()
+    public async Task Suspended_delivery_has_no_receipt_and_catches_up_after_restore_unknown_owner_is_dropped()
     {
         await using var runtime = await Runtime.CreateAsync();
         runtime.Directory.Set(runtime.First, JournalOwnerStatus.Suspended);
@@ -103,8 +102,10 @@ public sealed class NotificationOwnerTests
         Assert.True(await runtime.Maintenance().RunCatchUpPassAsync(default));
         Assert.Single((await runtime.PageAsync(runtime.First)).Items);
         Assert.Equal(1, await runtime.CountAsync("event_receipts"));
-        await Assert.ThrowsAsync<EventDeadLetterException>(() =>
-            runtime.DeliverAsync(message with { OwnerId = Guid.NewGuid() }));
+        // An unknown owner is logged and dropped: no receipt, no notification.
+        await runtime.DeliverAsync(message with { OwnerId = Guid.NewGuid() });
+        Assert.Equal(1, await runtime.CountAsync("event_receipts"));
+        Assert.Single((await runtime.PageAsync(runtime.First)).Items);
     }
 
     [VesselEventPostgresTheory]
@@ -313,13 +314,8 @@ public sealed class NotificationOwnerTests
         }
         public Task DeliverAsync(VesselEvent message)
         {
-            var settings = new MessagingSettings();
-            var registry = new VesselModuleRegistry([module]);
-            var topology = new MessagingTopology(settings, registry);
-            return EventSubscriptionListener.Handle(message,
-                new Envelope { Destination = new Uri("rabbitmq://queue/" + topology.SubscriptionQueue(Subscription.Name)) },
-                new MessagingHost("notifications", [module]), topology, Scopes, Directory,
-                NullLogger<EventSubscriptionHandlerLog>.Instance, default);
+            return new EventSubscriptionListener(new MessagingHost("notifications", [module]), Scopes, Directory,
+                NullLogger<EventSubscriptionHandlerLog>.Instance).HandleAsync(message, default);
         }
         public SubscriptionMaintenanceService Maintenance(params IMaintenanceHeartbeat[] heartbeats) =>
             new(new("notifications", [module]), Scopes, Directory, Store, Clock,

@@ -53,12 +53,13 @@ http.createServer((req, res) => {
 
 
 # Issue #105. Capabilities that compose.yaml adds back after dropping all; every other service has none.
-CAPABILITIES = {'postgres': ['CAP_CHOWN', 'CAP_DAC_OVERRIDE', 'CAP_SETGID', 'CAP_SETUID'],
-                'rabbitmq': ['CAP_CHOWN', 'CAP_DAC_OVERRIDE', 'CAP_SETGID', 'CAP_SETUID']}
+CAPABILITIES = {'postgres': ['CAP_CHOWN', 'CAP_DAC_OVERRIDE', 'CAP_SETGID', 'CAP_SETUID']}
 # What a root restore command adds back to extract an archive into a volume another user owns (deploy/README.md).
 RESTORE_CAPABILITIES = ('--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER')
 # Inserted by the newer-schema check only, then removed.
 FUTURE_MIGRATION = '29990101000000_FromANewerImage'
+# Issue #99: live delivery (append to settled receipt) at the 95th percentile, over this many events.
+LATENCY_LIMIT_SECONDS, LATENCY_SAMPLES = 2.0, 20
 
 
 def run(*args, **kwargs):
@@ -97,10 +98,8 @@ class Check:
                        else {kind: f'{self.name}:{kind}' for kind in ('api', 'web')})
         self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
         self.database_password = secrets.token_hex(24)
-        self.broker_password = secrets.token_hex(24)
         self.owner = str(uuid.uuid4())
         self.http_port, self.https_port, self.redirect_port = port(), port(), port()
-        self.broker_port = port()
         self.projects = [self.name, self.name + '-restore']
         self.counts = {}
         self.tls = True
@@ -109,6 +108,8 @@ class Check:
         self.session = None
         self.browser_container = None
         self.upgrade = None
+        # Stores migrate needs besides PostgreSQL: none since issue #99.
+        self.bootstrap_services = ()
 
     def prepare(self):
         for file in ('compose.yaml', 'compose.tls.yaml', 'compose.credentials.yaml', 'compose.storage-local.yaml', 'Caddyfile'):
@@ -145,7 +146,6 @@ class Check:
       # Every worker reads the identity owner directory, so it needs the same sign-in settings as the API.
       Vessel__Auth__OwnerId: ${{Vessel__Auth__OwnerId}}
       Vessel__Identity__Origins__0: ${{VESSEL_IDENTITY_ORIGIN}}
-      Vessel__Messaging__RabbitMqUri: "amqp://${{RABBITMQ_USER}}:${{RABBITMQ_PASSWORD}}@rabbitmq:5672/"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -166,10 +166,6 @@ class Check:
       start_period: 10s
       retries: 6
     restart: unless-stopped
-  rabbitmq:
-    environment:
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"
-      RABBITMQ_CTL_ERL_ARGS: "+S 1:1"
   web:
     image: {self.images['web']}
     pull_policy: never
@@ -193,9 +189,6 @@ VESSEL_IDENTITY_REGISTRATION=Invitation
 Vessel__Auth__OwnerId={self.owner}
 VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
 VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
-RABBITMQ_USER=vessel
-RABBITMQ_PASSWORD={self.broker_password}
-VESSEL_RABBITMQ_MANAGEMENT_BIND=127.0.0.1:{self.broker_port}
 VESSEL_WEB_BIND=127.0.0.1:{self.http_port}
 VESSEL_NETWORK_SUBNET={network}.0/24
 VESSEL_NETWORK_GATEWAY={network}.1
@@ -306,7 +299,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         return name + '=' + cookie.value
 
     def wallet_bootstrap(self):
-        self.compose('up', '-d', '--wait', 'postgres', 'rabbitmq', stdout=subprocess.DEVNULL)
+        self.compose('up', '-d', '--wait', 'postgres', *self.bootstrap_services, stdout=subprocess.DEVNULL)
         self.compose('run', '--rm', 'migrate', stdout=subprocess.DEVNULL)
         self.compose('up', '-d', 'api', stdout=subprocess.DEVNULL)
         for _ in range(60):
@@ -432,14 +425,41 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.monitor_event_id = events[0]['id']
         self.event_stream(before['nextCursor'], self.monitor_event_id)
         self.wait_event_delivery(self.monitor_event_id)
-        self.compose('stop', 'rabbitmq', stdout=subprocess.DEVNULL)
+        self.delivery_latency()
+        # A killed listening connection only delays delivery: the verifier reconnects, or its catch-up finds the event.
+        listener = "application_name = 'vessel-listen-verification'"
+        self.expect(self.sql(f'SELECT count(*) FROM pg_stat_activity WHERE {listener}') == '1',
+                    'the verifier holds one listening PostgreSQL connection', 'monitor')
+        self.expect(self.sql(f'SELECT bool_and(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE {listener}') == 't',
+                    'the listening connection is terminated', 'monitor')
         event_id = self.change_status_event('paused')
-        self.expect(self.event_pending(event_id), 'broker outage leaves a durable pending publication in the outbox', 'monitor')
-        self.compose('up', '-d', '--wait', 'rabbitmq', stdout=subprocess.DEVNULL)
         self.wait_event_delivery(event_id)
-        self.wait_outbox_drained()
+        for _ in range(60):
+            if self.sql(f'SELECT count(*) FROM pg_stat_activity WHERE {listener}') == '1':
+                break
+            time.sleep(1)
+        self.expect(self.sql(f'SELECT count(*) FROM pg_stat_activity WHERE {listener}') == '1',
+                    'the verifier reconnects its listening connection', 'monitor')
         self.expect(self.json('/api/plays/' + self.play)['summary']['status'] == 'paused',
-                    'broker recovery does not replay the owner mutation', 'monitor')
+                    'recovery does not replay the owner mutation', 'monitor')
+
+    def delivery_latency(self):
+        """Issue #99: an event reaches its subscriber through a PostgreSQL notification, measured in the database from
+        the event's detection to its settled receipt. Catch-up could not deliver this fast: its discovery grace is 30 s."""
+        ids = []
+        for index in range(LATENCY_SAMPLES):
+            # The Play is planned here: pause, plan, pause … so each step is a real change.
+            ids.append(self.change_status_event('planned' if index % 2 else 'paused'))
+            time.sleep(0.2)
+        for event_id in ids:
+            self.wait_event_delivery(event_id)
+        listed = ','.join("'" + str(uuid.UUID(event_id)) + "'" for event_id in ids)
+        p50, p95, worst = (float(value) for value in self.sql(
+            'SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds), percentile_cont(0.95) WITHIN GROUP (ORDER BY seconds), '
+            'max(seconds) FROM (SELECT extract(epoch FROM r.settled_at - e.detected_at) AS seconds FROM event_receipts r '
+            "JOIN events e USING (owner_id, event_id) WHERE r.subscription = 'verification' AND r.event_id IN (" + listed + ')) s').split('|'))
+        print(f'Live delivery over {LATENCY_SAMPLES} events: p50 {p50:.3f} s, p95 {p95:.3f} s, max {worst:.3f} s', flush=True)
+        self.expect(p95 < LATENCY_LIMIT_SECONDS, f'live delivery p95 {p95:.3f} s is under {LATENCY_LIMIT_SECONDS:g} s', 'monitor')
 
     def change_status_event(self, status):
         before = self.json('/api/events?limit=200')
@@ -449,7 +469,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         after = self.json('/api/events?after=' + before['nextCursor'] + '&limit=200')
         events = [event for event in after['events']
                   if event['subject']['playId'] == self.play and event['type'] == 'play.status-changed']
-        self.expect(len(events) == 1, 'status event commits while broker is unavailable', 'monitor')
+        self.expect(len(events) == 1, 'one status change commits one event', 'monitor')
         return events[0]['id']
 
     def event_stream(self, after, expected_id):
@@ -485,15 +505,6 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                               project=project, capture_output=True, text=True)
         return result.stdout.strip()
 
-    def outbox_count(self, project=None):
-        # The API publishes through its own Wolverine envelope schema; a broker outage leaves envelopes here.
-        return int(self.sql('SELECT count(*) FROM wolverine_api.wolverine_outgoing_envelopes', project) or '0')
-
-    def event_pending(self, event_id, project=None):
-        # The committed event is the record; its publication waits in the outbox until the broker returns.
-        # The verification subscription may still catch up from the database on its own, which is the design.
-        return self.outbox_count(project) > 0 and self.event_delivery_state(event_id, project) != 'failed'
-
     def event_delivery_state(self, event_id, project=None):
         event_id = str(uuid.UUID(event_id))
         return self.sql("SELECT state FROM event_receipts WHERE owner_id = '" + self.owner + "' AND event_id = '" + event_id +
@@ -508,7 +519,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         raise AssertionError('Durable event delivery did not recover: ' + event_id)
 
     def notifications(self):
-        """A test notification travels API, event, broker or catch-up, hub, feed and stream, even through a broker outage."""
+        """A test notification travels API, event, notification or catch-up, hub, feed and stream, even past a stopped hub."""
         for path in ('/api/notifications', '/api/notifications/head', '/api/notifications/preferences'):
             self.expect(self.request(path, auth=False)[0] == 401, 'notification route requires authentication: ' + path, 'notifications')
         status, headers, _ = self.request('/api/notifications/head')
@@ -543,12 +554,12 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         read = self.json('/api/notifications/' + claim['popups'][0]['id'] + '/read', None, 'POST')
         self.expect(read['state'] == 'read' and self.json('/api/notifications/head')['unreadCount'] == 0,
                     'reading clears the unread count', 'notifications')
-        # Broker outage: the event commits; the hub's catch-up reads it from PostgreSQL.
+        # Hub stopped: the event commits and nobody hears its notification; the hub's catch-up reads it from PostgreSQL.
         time.sleep(11)
-        self.compose('stop', 'rabbitmq', stdout=subprocess.DEVNULL)
-        self.expect(self.request('/api/notifications/test', 'POST')[0] == 202, 'test request commits while the broker is unavailable', 'notifications')
+        self.compose('stop', 'worker-notifications', stdout=subprocess.DEVNULL)
+        self.expect(self.request('/api/notifications/test', 'POST')[0] == 202, 'test request commits while the hub is stopped', 'notifications')
+        self.compose('up', '-d', '--wait', 'worker-notifications', stdout=subprocess.DEVNULL)
         self.wait_notifications(2)
-        self.compose('up', '-d', '--wait', 'rabbitmq', stdout=subprocess.DEVNULL)
         self.notification_count = 2
 
     def wait_notifications(self, count, project=None):
@@ -559,18 +570,10 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             time.sleep(1)
         raise AssertionError('The Notification Hub did not deliver ' + str(count) + ' notifications.')
 
-    def wait_outbox_drained(self, project=None):
-        for _ in range(120):
-            if self.outbox_count(project) == 0:
-                self.expect(True, 'the outbox drains once the broker is reachable', 'monitor')
-                return
-            time.sleep(1)
-        raise AssertionError('The event outbox did not drain after the broker returned.')
-
     def private_logs(self, project=None):
         logs = self.compose('logs', '--no-color', 'api', 'worker', 'worker-notifications', 'verifier', 'migrate',
                             project=project, capture_output=True, text=True).stdout
-        generated = [self.database_password, self.broker_password, self.s3_secret]
+        generated = [self.database_password, self.s3_secret]
         if self.session_cookie:
             generated.append(self.session_cookie.split('=', 1)[1])
         for secret in generated:
@@ -637,21 +640,22 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.expect(inspected['State']['Health']['Status'] == 'healthy', 'worker is healthy after a productive pass', 'worker')
         self.expect(inspected['Config']['User'] == 'app', 'worker runs as the non-root app user', 'worker')
         self.expect(not self.ports('worker'), 'worker publishes no port', 'worker')
-        broker = self.ports('rabbitmq')
-        self.expect('5672/tcp' not in broker, 'RabbitMQ AMQP is not published', 'worker')
-        self.expect([b['HostIp'] for b in broker.get('15672/tcp', [])] == ['127.0.0.1'], 'RabbitMQ management is bound to loopback only', 'worker')
+        # Issue #99: no broker; each worker holds one listening PostgreSQL connection, the API none.
+        services = self.compose('ps', '-a', '--format', '{{.Service}}', capture_output=True, text=True).stdout.split()
+        self.expect('rabbitmq' not in services, 'the stack runs no message broker', 'worker')
+        listeners = self.sql("SELECT string_agg(application_name, ',' ORDER BY application_name) FROM pg_stat_activity "
+                             "WHERE application_name LIKE 'vessel-listen-%'")
+        self.expect(listeners == 'vessel-listen-monitor,vessel-listen-notifications,vessel-listen-verification',
+                    'monitor, notifications and verifier workers each listen on one PostgreSQL connection', 'worker')
         for _ in range(60):
             if self.json('/api/monitor')['workerOnline']:
                 break
             time.sleep(1)
         self.expect(self.json('/api/monitor')['workerOnline'], 'API reports the worker heartbeat online', 'worker')
-        # The worker refuses a module set its deployment schema was not provisioned for.
-        wrong = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Worker__Modules__0=verification',
-                             '-e', 'Vessel__Worker__Deployment=monitor', 'worker', check=False, capture_output=True, text=True)
-        self.expect(wrong.returncode != 0 and 'Password' not in wrong.stderr + wrong.stdout, 'worker rejects an unprovisioned module set without printing secrets', 'worker')
         unknown = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Worker__Modules__0=nonexistent', 'worker',
                                check=False, capture_output=True, text=True)
-        self.expect(unknown.returncode != 0, 'worker rejects an unknown module', 'worker')
+        self.expect(unknown.returncode != 0 and 'Password' not in unknown.stderr + unknown.stdout,
+                    'worker rejects an unknown module without printing secrets', 'worker')
         # The Notification Hub runs as its own deployment, with its own heartbeat file and row.
         container = self.compose('ps', '-q', 'worker-notifications', capture_output=True, text=True).stdout.strip()
         inspected = json.loads(run('docker', 'inspect', container, capture_output=True, text=True).stdout)[0]
@@ -697,7 +701,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             added = sorted(cap.upper() if cap.upper().startswith('CAP_') else 'CAP_' + cap.upper() for cap in host.get('CapAdd') or [])
             self.expect(added == CAPABILITIES.get(service, []), service + ' adds back only its listed capabilities', 'hardening')
             self.expect(host.get('ReadonlyRootfs') is True, service + ' has a read-only root', 'hardening')
-        expected = {'postgres', 'rabbitmq', 'api', 'worker', 'worker-notifications', 'web', 'verifier'}
+        expected = {'postgres', 'api', 'worker', 'worker-notifications', 'web', 'verifier'}
         expected |= {'rustfs'} if self.args.storage == 's3' else set()
         expected |= {'tls'} if self.tls else set()
         self.expect(expected <= set(services), 'hardening covered every long-running service', 'hardening')
@@ -800,12 +804,12 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.chart_account = self.json('/api/accounts', {'name': 'Synthetic chart', 'venueId': 'hyperliquid', 'address': '0x' + '1' * 40}, 'POST')['id']
 
     def restore(self):
-        # Backup while an event is pending, then discard RabbitMQ's volume along
-        # with the old deployment. Recovery must come from PostgreSQL.
-        self.compose('stop', 'rabbitmq', stdout=subprocess.DEVNULL)
+        # Backup while an event is not yet delivered, then discard the old deployment. Recovery must come from
+        # PostgreSQL: the restored verifier's catch-up.
+        self.compose('stop', 'verifier', stdout=subprocess.DEVNULL)
         self.restore_event_id = self.change_status_event('planned')
-        self.expect(self.event_pending(self.restore_event_id),
-                    'database backup includes pending event work', 'restore')
+        self.expect(self.event_delivery_state(self.restore_event_id) == '',
+                    'database backup includes undelivered event work', 'restore')
         self.private_logs()
         # Every host stops before a backup: web, api and the workers (README upgrade/backup procedure).
         self.compose('stop', 'web', 'api', 'worker', 'worker-notifications', 'verifier', stdout=subprocess.DEVNULL)
@@ -856,16 +860,15 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                     'restored previously revoked session cannot authenticate after reset', 'wallet')
         self.wallet_sign_in()
         self.wait_event_delivery(self.restore_event_id, project)
-        self.wait_outbox_drained(project)
         restored_events = self.json('/api/events?limit=200')
         self.expect(any(event['id'] == self.restore_event_id for event in restored_events['events']),
-                    'event identity survives database restore and broker volume loss', 'restore')
+                    'event identity survives database restore', 'restore')
         self.private_logs(project)
         self.expect(self.request('/health/ready')[0] == 200, 'restored database/migrations ready', 'restore')
         self.expect(self.compose('ps', '--format', 'json', 'worker', project=project, capture_output=True, text=True).stdout.count('"healthy"') == 1,
-                    'restored worker healthy without the broker volume', 'restore')
+                    'restored worker healthy', 'restore')
         self.expect(self.compose('ps', '--format', 'json', 'worker-notifications', project=project, capture_output=True, text=True).stdout.count('"healthy"') == 1,
-                    'restored notifications worker healthy without the broker volume', 'restore')
+                    'restored notifications worker healthy', 'restore')
         restored = self.json('/api/notifications?tab=all')
         self.expect(restored['allTotal'] == self.notification_count and any(item['state'] == 'read' for item in restored['items']),
                     'notifications and their read state survive the restore', 'restore')
@@ -1093,19 +1096,46 @@ class Upgrade(Check):
         return run('docker', 'compose', '--project-directory', str(self.temp), '-p', self.name, *args,
                    cwd=self.temp, env=verification_environment(), **kwargs)
 
-    def prepare(self):
+    def deploy_files(self, version=None):
+        """The operator directory's Compose files: this tree's, or those of the release tagged vVERSION."""
         files = ['compose.yaml', 'compose.tls.yaml', 'compose.paper.yaml']
         files += ['compose.storage-local.yaml'] if self.args.storage == 'local' else []
         for file in files + ['Caddyfile']:
-            text = (ROOT / 'deploy' / file).read_text()
+            if version:
+                text = run('git', '-C', str(ROOT), 'show', f'v{version}:deploy/{file}', capture_output=True, text=True).stdout
+            else:
+                text = (ROOT / 'deploy' / file).read_text()
             (self.temp / file).write_text(text.replace('skorcius/vessel:', self.repository + ':'))
+        # The release before issue #99 still runs RabbitMQ; give it the same CPU limit as before.
+        self.broker = 'rabbitmq:' in (self.temp / 'compose.yaml').read_text()
+        if self.broker:
+            (self.temp / 'cpu.yaml').write_text('services:\n  rabbitmq:\n    environment:\n'
+                                                '      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"\n'
+                                                '      RABBITMQ_CTL_ERL_ARGS: "+S 1:1"\n')
+        else:
+            (self.temp / 'cpu.yaml').unlink(missing_ok=True)
+        return files + (['cpu.yaml'] if self.broker else [])
+
+    def switch_deploy_files(self):
+        """What an operator does before `deploy/vessel upgrade`: replace the Compose files with the target release's.
+        The .env keeps every other line, stale broker settings included."""
+        files = self.deploy_files()
+        env = self.temp / '.env'
+        env.write_text(re.sub(r'(?m)^COMPOSE_FILE=.*$', 'COMPOSE_FILE=' + ':'.join(files), env.read_text()))
+
+    def broker_container(self):
+        return run('docker', 'ps', '-a', '--filter', f'label=com.docker.compose.project={self.name}',
+                   '--filter', 'label=com.docker.compose.service=rabbitmq', '--format', '{{.ID}} {{.State}}',
+                   capture_output=True, text=True).stdout.split()
+
+    def prepare(self):
+        # The previous release as an operator runs it: its own deploy files (RabbitMQ included up to 0.4.2), and this
+        # tree's operator command, which the upgrade uses.
+        files = self.deploy_files(self.previous)
         shutil.copy2(ROOT / 'deploy' / 'vessel', self.temp / 'vessel')
-        (self.temp / 'cpu.yaml').write_text('services:\n  rabbitmq:\n    environment:\n'
-                                            '      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"\n'
-                                            '      RABBITMQ_CTL_ERL_ARGS: "+S 1:1"\n')
         network = free_network([self.parent.network])
         (self.temp / '.env').write_text(f'''COMPOSE_PROJECT_NAME={self.name}
-COMPOSE_FILE={':'.join(files + ['cpu.yaml'])}
+COMPOSE_FILE={':'.join(files)}
 COMPOSE_PROFILES=paper
 VESSEL_VERSION={self.previous}
 POSTGRES_PASSWORD={self.database_password}
@@ -1162,6 +1192,7 @@ VESSEL_IDENTITY_ORIGIN=https://localhost:{self.https_port}
         self.prepare()
         self.tag_images()
         group = 'upgrade'
+        self.bootstrap_services = ('rabbitmq',) if self.broker else ()
         self.wallet_bootstrap()
         self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
         self.ready()
@@ -1172,6 +1203,11 @@ VESSEL_IDENTITY_ORIGIN=https://localhost:{self.https_port}
             row['Image'].endswith(f'-{self.previous}') for name, row in hosts.items() if name != 'tls'),
             f'published {self.previous} runs API, web, TLS, monitor, notifications and paper workers', group)
         before = self.applied()
+        previous_broker = self.broker
+        self.switch_deploy_files()
+        if previous_broker:
+            self.expect(self.broker_container()[1:] == ['running'] and not self.broker,
+                        f'{self.previous} runs RabbitMQ; the {self.candidate} deploy files define no broker', group)
 
         plan = self.vessel('upgrade', '--to', self.candidate, '--no-pull')
         self.expect(plan.returncode == 2 and self.applied() == before and self.hosts().keys() == hosts.keys()
@@ -1179,6 +1215,10 @@ VESSEL_IDENTITY_ORIGIN=https://localhost:{self.https_port}
         result = self.vessel('upgrade', '--to', self.candidate, '--yes', '--no-pull')
         self.expect(result.returncode == 0, f'deploy/vessel upgrade --to {self.candidate} succeeds', group)
         out = result.stdout
+        if previous_broker:
+            self.expect('warn  rabbitmq still runs but this configuration no longer uses it' in out
+                        and self.broker_container()[1:] == ['running'],
+                        'the retired broker is reported and left alone, neither a writer nor restarted', group)
         steps = ['Stopping tls, web', 'Stopping api, worker, worker-notifications, worker-paper', 'Backup complete',
                  f'Setting VESSEL_VERSION={self.candidate}', 'Running migrate',
                  *[f'Running {" ".join(step)}' for step in release_steps(self.manifests)], f'on {self.candidate}\n']
@@ -1219,6 +1259,22 @@ VESSEL_IDENTITY_ORIGIN=https://localhost:{self.https_port}
         item = self.json('/api/plays/' + self.play + '/evidence')[0]
         self.expect(item['note'] == 'Synthetic restore evidence' and item['markup'] == self.markup, 'evidence note and markup survive the upgrade', group)
         self.expect(self.play in json.dumps(self.json('/api/plays/search?q=Synthetic')), 'the rebuilt search index finds the Play', group)
+        if previous_broker:
+            # deploy/README.md "Upgrade to 0.4.3": the operator removes the retired broker; nothing depends on it.
+            run('docker', 'rm', '-f', self.broker_container()[0], stdout=subprocess.DEVNULL)
+            run('docker', 'volume', 'rm', self.name + '_rabbitmq', stdout=subprocess.DEVNULL)
+            self.expect(self.broker_container() == [], 'the retired broker and its volume are removed', group)
+        # Broker-free delivery on the upgraded installation: the Notification Hub hears the test request at once,
+        # well inside catch-up's 30-second discovery grace.
+        total = self.json('/api/notifications?tab=all')['allTotal']
+        self.expect(self.request('/api/notifications/test', 'POST')[0] == 202, 'test notification requested after the upgrade', group)
+        started = time.monotonic()
+        while self.json('/api/notifications?tab=all')['allTotal'] <= total and time.monotonic() - started < 15:
+            time.sleep(0.2)
+        self.expect(self.json('/api/notifications?tab=all')['allTotal'] == total + 1,
+                    f'the upgraded hosts deliver live without a broker ({time.monotonic() - started:.1f} s)', group)
+        hosts = self.hosts()
+        self.expect(all(row.get('Health') == 'healthy' for row in hosts.values()), 'every host stays healthy without the broker', group)
 
     def cleanup(self):
         errors = []

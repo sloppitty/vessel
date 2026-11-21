@@ -1,6 +1,6 @@
 # Optional standalone paper worker. Requires a paper-capable image and explicit
 # journal migration; never apply to an older image. The standalone paper
-# scheduler uses no broker, command queue or messaging envelope schema.
+# scheduler listens for no notification and runs no event subscription.
 # Include this overlay and --profile paper on every relevant Compose command.
 services:
   worker-paper:

@@ -4,8 +4,8 @@ namespace Vessel.Persistence.Events.Subscriptions;
 
 /// <summary>
 /// The explicit, bounded admin retry. Retained <c>failed</c> receipts return to <c>pending</c> with a bounded extra
-/// attempt budget on top of their preserved attempts; the low-water mark is never rewound. Broker redrive from a
-/// dead-letter queue never reopens a receipt.
+/// attempt budget on top of their preserved attempts; the low-water mark is never rewound. A repeated notification
+/// never reopens a receipt.
 /// </summary>
 public sealed class EventReceiptAdmin(VesselDbContext db, UnitOfWork work, TimeProvider time, ILogger<EventReceiptAdmin> logger)
 {

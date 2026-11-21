@@ -93,8 +93,7 @@ public sealed partial class EventSubscriptionTests
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Vessel"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused",
-            ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
-            ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1"
+            ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString()
         });
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton<IJournalOwnerContext>(new CoreOwner(Guid.NewGuid()));

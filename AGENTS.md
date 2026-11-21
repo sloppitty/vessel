@@ -28,7 +28,8 @@ Never:
    turn imported operations into Plays or links without the owner. Unknown values
    stay null (never zero or guessed) and exact decimal strings stay intact.
 8. Make Domain or Application reference concrete infrastructure (such as
-   Wolverine or RabbitMQ), or put business-facing contracts in infrastructure.
+   Npgsql or the PostgreSQL notification transport), or put business-facing
+   contracts in infrastructure.
 9. Enforce a unique active Play per account and instrument.
 10. Move the approved layout's sections. Themes change colours and radius only.
 11. Accept a trading-capable venue credential, or place or sign orders at a

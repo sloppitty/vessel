@@ -19,9 +19,9 @@ public static class MessagingCommands
                dotnet Vessel.Api.dll deregister-event-subscription <name>
                dotnet Vessel.Api.dll retry-event-receipts <name> (--owner <guid> | --all-owners) [--limit 1-1000] [--attempts n]
         Reads ConnectionStrings__Vessel and Vessel__Messaging__* from server configuration.
-        provision-messaging runs after the EF migrations: envelope storage for every deployment, the broker topology
-        of every module and insert-only subscription registrations. Restore procedure: stop every host, restore the
-        database, rotate-event-epoch, provision-messaging, then start the hosts.
+        provision-messaging runs after the EF migrations: insert-only subscription registrations of every module.
+        Restore procedure: stop every host, restore the database, rotate-event-epoch, provision-messaging, then start
+        the hosts.
         """;
 
     public static async Task<int> RunAsync(string[] args, TextWriter output, CancellationToken ct = default)
@@ -42,8 +42,7 @@ public static class MessagingCommands
             {
                 case ["provision-messaging"]:
                     var result = await MessagingProvisioning.ProvisionAsync(configuration, ct);
-                    await output.WriteLineAsync($"Provisioned envelope storage ({string.Join(", ", result.Schemas)}) and broker topology. " +
-                        $"Registered subscriptions: {List(result.Registered)}; already registered: {List(result.Existing)}.");
+                    await output.WriteLineAsync($"Registered subscriptions: {List(result.Registered)}; already registered: {List(result.Existing)}.");
                     return 0;
                 case ["rotate-event-epoch"]:
                     var connection = configuration.GetConnectionString("Vessel");
@@ -53,8 +52,8 @@ public static class MessagingCommands
                     return 0;
                 case ["deregister-event-subscription", var name]:
                     var removed = await MessagingProvisioning.DeregisterAsync(configuration, name, ct);
-                    await output.WriteLineAsync(removed ? $"Deregistered subscription {name}; its receipts and queue were removed."
-                        : $"Subscription {name} was not registered; its queue was removed if present.");
+                    await output.WriteLineAsync(removed ? $"Deregistered subscription {name}; its progress and receipts were removed."
+                        : $"Subscription {name} was not registered.");
                     return 0;
                 case ["retry-event-receipts", var name, .. var options] when Options(options, out var limit, out var attempts, out var owner, out var allOwners):
                     var retried = await MessagingProvisioning.RetryFailedAsync(configuration, name, limit, attempts, owner, allOwners, ct);
@@ -67,7 +66,7 @@ public static class MessagingCommands
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            // Driver and broker errors can contain hosts or credentials. Only Vessel's own text is shown.
+            // Driver errors can contain hosts or credentials. Only Vessel's own text is shown.
             var safe = error.Source is "Vessel.Messaging" or "Vessel.Persistence" or "Vessel.Application" &&
                 error is InvalidOperationException or ArgumentException or Vessel.Application.Common.ProblemException;
             return await Fail(output, safe ? error.Message : $"The command failed ({error.GetType().Name}). Check private configuration.");

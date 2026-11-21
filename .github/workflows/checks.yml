@@ -26,22 +26,8 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
-      rabbitmq:
-        image: rabbitmq:4.3.6-management
-        env:
-          RABBITMQ_DEFAULT_USER: vessel_ci
-          # Ephemeral CI broker password, not an application credential.
-          RABBITMQ_DEFAULT_PASS: vessel-events-ci-only
-        ports:
-          - 5672:5672
-        options: >-
-          --health-cmd "rabbitmq-diagnostics -q ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 24
     env:
       Vessel_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=vessel_tests;Username=vessel;Password=vessel-ci-only
-      Vessel_TEST_EVENT_RABBIT: amqp://vessel_ci:vessel-events-ci-only@127.0.0.1:5672
     steps:
       - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:

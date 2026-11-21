@@ -6,7 +6,6 @@ import signal
 import subprocess
 import sys
 import time
-from urllib.parse import quote
 import ipaddress
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,12 +38,6 @@ def configuration():
                                               "vessel:messaging:", "vessel:monitor:", "vessel:notifications:",
                                               "vessel:worker:", "vessel:paper:")):
             env[key] = value
-    if not any(configuration_key(key) == "vessel:messaging:rabbitmquri" for key in env):
-        user, password = values.get("RABBITMQ_USER"), values.get("RABBITMQ_PASSWORD")
-        if user and password:
-            env["Vessel__Messaging__RabbitMqUri"] = (
-                f"amqp://{quote(user, safe='')}:{quote(password, safe='')}@127.0.0.1:55672/"
-            )
     if values.get("ConnectionStrings__Vessel"):
         env["ConnectionStrings__Vessel"] = values["ConnectionStrings__Vessel"]
     else:
@@ -58,13 +51,8 @@ def configuration():
     return env
 
 
-# The API and worker cannot start without PostgreSQL and RabbitMQ; both bind loopback only.
-SERVICES = ["docker", "compose", "up", "--detach", "--wait", "postgres", "rabbitmq"]
-
-
-def require_broker(env):
-    if not any(configuration_key(key) == "vessel:messaging:rabbitmquri" and value for key, value in env.items()):
-        raise SystemExit("Set private RABBITMQ_USER and RABBITMQ_PASSWORD in the ignored root .env first.")
+# The API and worker need only PostgreSQL, bound to loopback.
+SERVICES = ["docker", "compose", "up", "--detach", "--wait", "postgres"]
 
 
 def start_services():
@@ -74,7 +62,7 @@ def start_services():
     try:
         subprocess.run(SERVICES, cwd=ROOT, check=True)
     except (OSError, subprocess.CalledProcessError):
-        raise SystemExit("Could not start the local PostgreSQL and RabbitMQ services with Docker Compose.") from None
+        raise SystemExit("Could not start the local PostgreSQL service with Docker Compose.") from None
 
 
 def configuration_key(key):
@@ -128,8 +116,6 @@ def verification_environment():
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "run"
     env = configuration()
-    if mode in ["migrate", "run", "api", "worker", "lan"]:
-        require_broker(env)
     if mode == "identity":
         # For example: python3 scripts/dev.py identity bind-wallet --user <owner GUID> --address 0x…
         start_services()
@@ -209,13 +195,13 @@ def main():
                                                           "/tmp/vessel-dev-paper-heartbeat"),
                 }, start_new_session=True))
         if mode in ["run", "lan"]:
-            # Do not give the frontend process database or broker credentials.
+            # Do not give the frontend process database credentials.
             processes.append(subprocess.Popen(
                 ["pnpm", "--filter", "vessel-frontend", "dev", "--host", host],
                 cwd=ROOT, env=frontend_environment(), start_new_session=True,
             ))
             print(f"Frontend: http://{host}:5180 · API: http://127.0.0.1:5080", flush=True)
-            print("Workers run the monitor and notifications modules. Stop with Ctrl+C; PostgreSQL and RabbitMQ keep running.", flush=True)
+            print("Workers run the monitor and notifications modules. Stop with Ctrl+C; PostgreSQL keeps running.", flush=True)
             print("Sign in with a browser wallet bound once by: python3 scripts/dev.py identity bind-wallet "
                   "--user <owner GUID> --address <0x public address>", flush=True)
             if os.environ.get("Vessel_DEV_PAPER") == "1":

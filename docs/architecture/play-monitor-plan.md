@@ -27,6 +27,8 @@ Settled on October 14 after the first draft:
 - **Wolverine fit is checked first** (W0 spike) before any product work. W0 is complete with a conditional-go recommendation. Subsequent implementation authorization is recorded above.
 - **Unit of work first.** After W0, the owner chose a bounded unit-of-work refactor to centralize saves and transaction completion before integrating Wolverine. The top-level use case owns the boundary; nested stores do not commit or dispatch. Necessary intermediate saves remain inside the same transaction.
 
+Settled on November 20, 2026 (issue #99, decision D61): the broker is removed. Each event and each monitor request stages a `pg_notify` in its own transaction; one listening PostgreSQL connection per worker wakes the dispatcher or the scheduler, and catch-up and the scheduler tick stay the safety net. Topics, queues, dead-letter queues, envelope storage, Wolverine and RabbitMQ below are history; subscriptions, receipts, catch-up, retention, commands as durable request rows and everything else stay. The current design is in [messaging and workers](messaging-and-workers.md#transport).
+
 Settled on October 15, after review of the stack and before any of it merged:
 
 - **Topics and subscriptions.** Delivery follows the Azure Service Bus model, implemented on RabbitMQ through Wolverine; the broker choice is unchanged. Publishers write each event once to a topic and know nothing about who listens. Each subscriber owns a subscription: its queue, filter, limits, dead-letter queue and its own progress in PostgreSQL. Recovery is the subscriber's job, from the database. This replaces the earlier configured durable consumers, publisher-written delivery rows and the producer-side republish sweep. See [Topics, subscriptions and delivery](#topics-subscriptions-and-delivery).
@@ -419,7 +421,7 @@ Fill accounting cannot rely on the 90-day event history. Keep a durable source-i
 
 ## Topics, subscriptions and delivery
 
-Settled by the owner on October 15. The model is Azure Service Bus topics and subscriptions, built on RabbitMQ through Wolverine. Delivery is at least once within each subscription's retained responsibility window, with explicit terminal failures and gaps.
+Settled by the owner on October 15. The model is Azure Service Bus topics and subscriptions, built on RabbitMQ through Wolverine. Since November 20, 2026 (issue #99) the transport is PostgreSQL `LISTEN/NOTIFY` instead; the subscription, receipt, catch-up and retention rules below are unchanged, and topic, queue and dead-letter mechanics are history. Delivery is at least once within each subscription's retained responsibility window, with explicit terminal failures and gaps.
 
 ### Topic
 

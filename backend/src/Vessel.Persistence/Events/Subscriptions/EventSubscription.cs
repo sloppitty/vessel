@@ -36,8 +36,8 @@ public sealed record EventSubscriptionLimits
 }
 
 /// <summary>
-/// A subscriber's declaration: its name, owning module and immutable topic filter. The broker queue binds the
-/// same filters; PostgreSQL records the fingerprint, and a different filter needs a different name.
+/// A subscriber's declaration: its name, owning module and immutable topic filter. Live delivery and catch-up match
+/// events against the same filters; PostgreSQL records the fingerprint, and a different filter needs a different name.
 /// </summary>
 public sealed record EventSubscription
 {

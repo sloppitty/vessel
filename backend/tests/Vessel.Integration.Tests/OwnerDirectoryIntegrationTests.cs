@@ -25,7 +25,7 @@ public sealed class OwnerDirectoryIntegrationTests
         var owner = Guid.NewGuid();
         var builder = Builder(owner);
         WorkerHost.Configure(builder);
-        // Resolve the real composition without starting database/broker background services.
+        // Resolve the real composition without starting database background services.
         using var host = builder.Build();
         AssertDirectory(host.Services);
         await AssertOwnerScopeAsync(host.Services, owner);
@@ -82,7 +82,6 @@ public sealed class OwnerDirectoryIntegrationTests
     {
         ["Vessel:Auth:OwnerId"] = owner.ToString(),
         ["Vessel:Identity:Origins:0"] = "https://vessel.test",
-        ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
         ["ConnectionStrings:Vessel"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused"
     };
 }

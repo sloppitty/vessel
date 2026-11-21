@@ -481,8 +481,8 @@ internal static class Isolated
 /// event receipt) still fails a snapshot. Every table of the journal schema with an owner column (<c>"OwnerId"</c> or
 /// <c>owner_id</c>) is read for that owner: its row count and an MD5 of its rows' text in a stable order. Tables are
 /// discovered, not listed, so a new owner-scoped table is fingerprinted without a change here; <see cref="Required"/>
-/// fails the read if discovery misses a table the suite relies on. This host disables Wolverine message persistence,
-/// so no envelope table exists: the event journal tables are the record an outbox would relay. Identity rows live in
+/// fails the read if discovery misses a table the suite relies on. Delivery uses PostgreSQL notifications, so no
+/// envelope table exists: the event journal tables are the record. Identity rows live in
 /// their own schema and are not part of the journal.
 /// </summary>
 internal static class Persisted

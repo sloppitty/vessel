@@ -107,7 +107,7 @@ public sealed partial class VesselEventStore(VesselDbContext db, VesselEventMuta
                 await PersistAsync(draft, cancellationToken);
         }
         foreach (var command in commands) await outbox.StageAsync(command, cancellationToken);
-        // There is no SaveChangesAndFlushMessagesAsync here. Envelope writes enlist in db's actual transaction.
+        // Every notification is staged on db's actual transaction; PostgreSQL delivers them only with the commit.
     }, cancellationToken);
 
     public async Task AfterCommitAsync(CancellationToken cancellationToken)
@@ -115,7 +115,7 @@ public sealed partial class VesselEventStore(VesselDbContext db, VesselEventMuta
         try { await outbox.FlushAsync(CancellationToken.None); }
         catch (Exception error)
         {
-            // The commit succeeded. Wolverine's durable envelopes and subscriber catch-up own recovery.
+            // The commit succeeded. Subscriber catch-up and the scheduler tick own recovery.
             logger.LogWarning("Event dispatch is deferred to durable recovery after a successful commit ({ErrorType}).",
                 error.GetType().Name);
         }

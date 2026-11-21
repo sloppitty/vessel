@@ -13,7 +13,7 @@ public static class ConfigurationCheckCommand
     private const string Usage = """
         Usage: dotnet Vessel.Api.dll check-config [--Vessel:Key=value …]
         Validates the authentication, identity and database session settings exactly as the API and workers do at startup,
-        without opening a database or broker connection. Exit codes: 0 valid, 1 invalid, 2 usage.
+        without opening a database connection. Exit codes: 0 valid, 1 invalid, 2 usage.
         """;
 
     public static int Run(string[] args, TextWriter output)

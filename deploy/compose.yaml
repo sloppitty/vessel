@@ -26,7 +26,7 @@ x-hardening: &hardening
   cap_drop:
     - ALL
 
-# PostgreSQL and RabbitMQ start as root, fix their data volume's ownership and switch to their own user.
+# PostgreSQL starts as root, fixes its data volume's ownership and switches to its own user.
 x-root-entrypoint-capabilities: &root-entrypoint-capabilities
   - CHOWN
   - DAC_OVERRIDE
@@ -106,46 +106,20 @@ services:
       retries: 12
     restart: unless-stopped
 
-  rabbitmq:
-    <<: *hardening
-    image: rabbitmq:4.3.6-management
-    cap_add: *root-entrypoint-capabilities
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m
-    hostname: vessel-rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
-    # AMQP stays on the private network. The management page is for troubleshooting, loopback by default.
-    ports:
-      - "${VESSEL_RABBITMQ_MANAGEMENT_BIND:-127.0.0.1:15672}:15672"
-    volumes:
-      - rabbitmq:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 24
-    restart: unless-stopped
-
   migrate:
     <<: *hardening
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.4.2}
     read_only: true
     tmpfs:
       - /tmp:size=64m
-    # EF migrations, then explicit messaging provisioning with the broker administrator.
+    # EF migrations, then the explicit subscription registrations (provision-messaging).
     # Nothing is migrated or provisioned at API or worker startup.
     entrypoint: ["/app/migrate"]
     environment:
       <<: *identity-environment
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
     depends_on:
       postgres:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
     healthcheck:
       disable: true
@@ -168,7 +142,6 @@ services:
       Vessel__Evidence__Storage__S3__ForcePathStyle: ${VESSEL_S3_FORCE_PATH_STYLE:-true}
       Vessel__Evidence__Storage__S3__AccessKeyId: ${VESSEL_S3_ACCESS_KEY_ID:-}
       Vessel__Evidence__Storage__S3__SecretAccessKey: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
-      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
       Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
       Vessel__Monitor__ManualCooldown: ${VESSEL_MONITOR_MANUAL_COOLDOWN:-00:01:00}
@@ -200,7 +173,6 @@ services:
       Vessel__Worker__Modules__0: monitor
       Vessel__Worker__Deployment: monitor
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
       Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
       Vessel__Monitor__ManualCooldown: ${VESSEL_MONITOR_MANUAL_COOLDOWN:-00:01:00}
@@ -232,7 +204,6 @@ services:
       Vessel__Worker__Modules__0: notifications
       Vessel__Worker__Deployment: notifications
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
     depends_on:
       migrate:
@@ -285,5 +256,4 @@ networks:
 volumes:
   postgres:
   objects:
-  rabbitmq:
   api-tmp:

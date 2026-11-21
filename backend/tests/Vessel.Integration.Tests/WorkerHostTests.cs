@@ -14,11 +14,8 @@ using Vessel.Messaging;
 using Vessel.Messaging.Modules.Monitor;
 using Vessel.Messaging.Modules.Verification;
 using Vessel.Persistence;
+using Vessel.Persistence.Events;
 using Vessel.Worker;
-using Wolverine;
-using Wolverine.Configuration;
-using Wolverine.Runtime;
-using Wolverine.Runtime.Routing;
 using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
@@ -47,91 +44,67 @@ public sealed class WorkerHostTests
         builder.Configuration.AddConfiguration(Configuration(new()
         {
             ["Vessel:Worker:Modules:0"] = "nonexistent",
-            ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
             ["ConnectionStrings:Vessel"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused"
         }));
         var error = Assert.Throws<InvalidOperationException>(() => WorkerHost.Configure(builder));
         Assert.Contains("Unknown messaging module", error.Message);
     }
 
-    [Fact]
-    public void Provisioning_knows_every_deployment_and_its_module_set()
+    [VesselEventPostgresFact]
+    public async Task Monitor_worker_starts_with_only_postgresql_and_listens_on_its_own_connection()
     {
-        var settings = new MessagingSettings { Verification = true };
-        var registry = Vessel.Messaging.Modules.VesselModuleRegistry.From(settings);
-        var defaults = settings.DeploymentModules(registry);
-        Assert.Equal(["api", "monitor", "notifications", "verification"], defaults.Keys);
-        Assert.Equal(["notifications"], defaults["notifications"]);
-        Assert.Empty(defaults["api"]);
-        Assert.Equal(["monitor"], defaults["monitor"]);
-        settings.Deployments["monitor"] = ["verification", "monitor"];
-        Assert.Equal(["monitor", "verification"], settings.DeploymentModules(registry)["monitor"]);
-        settings.Deployments["monitor"] = ["nonexistent"];
-        Assert.Throws<InvalidOperationException>(() => settings.DeploymentModules(registry));
-        settings.Deployments.Clear();
-        settings.Deployments["api"] = ["monitor"];
-        Assert.Throws<InvalidOperationException>(() => settings.DeploymentModules(registry));
-    }
-
-    [VesselEventRabbitFact]
-    public async Task Startup_rejects_a_schema_provisioned_for_another_module_set()
-    {
-        await using var broker = await BrokerScope.CreateAsync();
-        // Not provisioned yet: no deployment may start, and no schema is created at runtime.
-        using (var early = Worker(broker, MonitorModule.ModuleName))
-            await Assert.ThrowsAnyAsync<InvalidOperationException>(() => early.StartAsync());
-        await broker.ProvisionAsync();
-        // The monitor schema was provisioned for ["monitor"]; a host running other modules in it must not start.
-        using (var wrong = Worker(broker, VerificationModule.ModuleName, deployment: MonitorModule.ModuleName))
-            await Assert.ThrowsAnyAsync<InvalidOperationException>(() => wrong.StartAsync());
-        // Changing a deployment's module set at provisioning is rejected too, until its schema is drained.
-        var changed = new ConfigurationBuilder().AddConfiguration(broker.Configuration).AddInMemoryCollection(
-            new Dictionary<string, string?> { ["Vessel:Messaging:Deployments:monitor:0"] = VerificationModule.ModuleName }).Build();
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            MessagingProvisioning.ProvisionAsync(changed, default, broker.Registry));
-        Assert.Contains("another deployment or module set", error.Message);
-        using var worker = Worker(broker, MonitorModule.ModuleName);
+        await using var scope = await DeliveryScope.CreateAsync();
+        // Neither provisioning nor a broker is needed to start: the worker's only dependency is PostgreSQL.
+        using var worker = Worker(scope, MonitorModule.ModuleName);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         await worker.StartAsync();
+        var listener = DeliveryScope.Listener(worker)!;
+        await scope.EventuallyAsync(() => Task.FromResult(listener.Connections == 1));
+        Assert.InRange(clock.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await scope.CountAsync(
+            $"SELECT count(*) FROM pg_stat_activity WHERE pid={listener.ProcessId} AND application_name='vessel-listen-monitor'"));
         await worker.StopAsync();
+        // The API listens to nothing.
+        Assert.Null(DeliveryScope.Listener(scope.Build(MessagingHosting.ApiDeployment, [])));
     }
 
-    [VesselEventRabbitFact]
-    public async Task Unknown_monitor_owner_dead_letters_while_active_owners_run_and_suspended_commands_are_acknowledged()
+    [VesselEventPostgresFact]
+    public async Task Unknown_monitor_owner_is_dropped_while_active_owners_run_and_suspended_commands_are_ignored()
     {
-        await using var broker = await BrokerScope.CreateAsync();
-        await broker.ProvisionAsync();
-        var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
+        await using var scope = await DeliveryScope.CreateAsync();
         var owners = new MutableOwnerDirectory();
-        owners.Set(broker.Owner, JournalOwnerStatus.Active);
+        owners.Set(scope.Owner, JournalOwnerStatus.Active);
         var other = Guid.NewGuid(); var suspended = Guid.NewGuid();
         owners.Set(other, JournalOwnerStatus.Active);
         owners.Set(suspended, JournalOwnerStatus.Suspended);
-        var activeCommand = await PendingCommandAsync(broker.Database, other);
-        var suspendedCommand = await PendingCommandAsync(broker.Database, suspended);
+        var activeCommand = await PendingCommandAsync(scope.Database, other);
+        var suspendedCommand = await PendingCommandAsync(scope.Database, suspended);
         var logs = new BackgroundWorkLogs();
         var wakeups = new ConcurrentBag<Guid>();
-        using var worker = Worker(broker, MonitorModule.ModuleName, logs: logs, owners: owners, wakeups: wakeups);
+        using var worker = Worker(scope, MonitorModule.ModuleName, logs: logs, owners: owners, wakeups: wakeups);
         await worker.StartAsync();
-        var bus = api.Services.GetRequiredService<IMessageBus>();
-        var queue = broker.Topology.CommandQueue(MonitorModule.ModuleName);
-        await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), "manual"));
-        await broker.EventuallyAsync(async () => await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)) == 1);
-        await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), broker.Owner, "manual"));
-        await bus.SendAsync(activeCommand);
-        await bus.SendAsync(suspendedCommand);
-        await broker.EventuallyAsync(() => Task.FromResult(wakeups.Contains(other) && logs.Messages.Any(m =>
+        await scope.EventuallyAsync(() => Task.FromResult(DeliveryScope.Listener(worker)!.Connections == 1));
+        var unknown = new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), "manual");
+        await scope.NotifyAsync(VesselNotifications.MonitorCommands, VesselNotifications.CommandPayload(unknown));
+        await scope.NotifyAsync(VesselNotifications.MonitorCommands, "{\"requestId\":");
+        await scope.NotifyAsync(VesselNotifications.MonitorCommands,
+            VesselNotifications.CommandPayload(new(Guid.CreateVersion7(), Guid.NewGuid(), scope.Owner, "manual")));
+        await scope.NotifyAsync(VesselNotifications.MonitorCommands, VesselNotifications.CommandPayload(activeCommand));
+        await scope.NotifyAsync(VesselNotifications.MonitorCommands, VesselNotifications.CommandPayload(suspendedCommand));
+        await scope.EventuallyAsync(() => Task.FromResult(wakeups.Contains(other) && logs.Messages.Any(m =>
             m.Text.Contains(suspendedCommand.RequestId.ToString(), StringComparison.Ordinal) &&
             m.Text.Contains("was dropped", StringComparison.Ordinal))));
         await worker.StopAsync();
         Assert.Equal([other], wakeups.ToArray());
-        await using (var db = broker.Database.Context(suspended))
+        await using (var db = scope.Database.Context(suspended))
         {
             var pending = await db.Set<MonitorAccount>().SingleAsync();
             Assert.Equal(suspendedCommand.RequestId, pending.RequestId);
             Assert.Equal("pending", pending.ManualState);
         }
-        Assert.Equal(0u, await broker.ReadyAsync(queue));
-        Assert.Equal(1u, await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)));
+        Assert.Contains(logs.Messages, m => m.Level == LogLevel.Warning &&
+            m.Text.Contains(unknown.RequestId.ToString(), StringComparison.Ordinal) && m.Text.Contains("unknown owner", StringComparison.Ordinal));
+        Assert.Contains(logs.Messages, m => m.Level == LogLevel.Warning && m.Text.Contains("could not be read", StringComparison.Ordinal));
     }
 
     [PostgresFact]
@@ -149,56 +122,52 @@ public sealed class WorkerHostTests
         services.AddLogging(logging => logging.AddProvider(logs));
         services.AddVesselPersistence(Configuration(new() { ["ConnectionStrings:Vessel"] = database.ConnectionString }));
         await using var provider = services.BuildServiceProvider();
-        await MonitorCommandListener.Handle(command, provider.GetRequiredService<IOwnerScopeFactory>(), directory,
-            provider.GetRequiredService<ILogger<MonitorCommandListener>>(), default);
+        await new MonitorCommandListener(provider.GetRequiredService<IOwnerScopeFactory>(), directory,
+            provider.GetRequiredService<ILogger<MonitorCommandListener>>()).HandleAsync(command, default);
         await using var db = database.Context(owner);
         var pending = await db.Set<MonitorAccount>().SingleAsync();
         Assert.Equal((command.RequestId, "pending"), (pending.RequestId, pending.ManualState));
         Assert.Contains(logs.Messages, m => m.Level == LogLevel.Warning &&
-            m.Text.Contains("acknowledged after InvalidOperationException", StringComparison.Ordinal) &&
+            m.Text.Contains("dropped after InvalidOperationException", StringComparison.Ordinal) &&
             m.Text.Contains(command.RequestId.ToString(), StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Messages, m => m.Text.Contains("Synthetic private", StringComparison.Ordinal));
     }
 
-    [VesselEventRabbitFact]
-    public async Task Command_queue_is_published_durably_by_the_api_and_listened_inline_by_its_module()
+    [VesselEventPostgresFact]
+    public async Task A_monitor_request_notifies_the_worker_only_when_its_pending_row_commits()
     {
-        await using var broker = await BrokerScope.CreateAsync();
-        await broker.ProvisionAsync();
-        var logs = new BackgroundWorkLogs();
-        var api = broker.Build(MessagingHosting.ApiDeployment, [], logs);
-        await api.StartAsync();
-        using var worker = Worker(broker, MonitorModule.ModuleName, logs: logs);
+        await using var scope = await DeliveryScope.CreateAsync();
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        var wakeups = new ConcurrentBag<Guid>();
+        using var worker = Worker(scope, MonitorModule.ModuleName, owners: scope.Owners, wakeups: wakeups);
         await worker.StartAsync();
-        var queue = new Uri($"rabbitmq://queue/{broker.Topology.CommandQueue(MonitorModule.ModuleName)}");
-
-        // The API only publishes: through the durable outbox, never inline.
-        var published = Endpoint(api, queue);
-        Assert.False(published.IsListener);
-        Assert.Equal(EndpointMode.Durable, published.Mode);
-        Assert.Contains(Routes(api), route => route == queue);
-
-        // The worker only listens, inline, so a delivery is acknowledged after the handler settles. It declares no
-        // publishing side for the same endpoint, so no second mode request can replace this one.
-        var listened = Endpoint(worker, queue);
-        Assert.True(listened.IsListener);
-        Assert.Equal(EndpointMode.Inline, listened.Mode);
-        Assert.DoesNotContain(Routes(worker), route => route == queue);
-        // Nothing in the worker may stage the command it consumes: it would bypass the API's durable outbox.
-        await using (var scope = worker.Services.GetRequiredService<IOwnerScopeFactory>().Create(broker.Owner))
+        await scope.EventuallyAsync(() => Task.FromResult(DeliveryScope.Listener(worker)!.Connections == 1));
+        var command = await PendingCommandAsync(scope.Database, scope.Owner);
+        async Task EnqueueAsync(bool commit)
         {
-            var outbox = scope.Services.GetRequiredService<Vessel.Persistence.Events.IVesselEventOutbox>();
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                outbox.StageAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), broker.Owner, "manual"), default));
-            Assert.Contains("consumes", error.Message);
+            await using var owned = api.Services.GetRequiredService<IOwnerScopeFactory>().Create(scope.Owner);
+            var sink = owned.Services.GetRequiredService<IMonitorCommandSink>();
+            var error = await Record.ExceptionAsync(() => owned.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+            {
+                await sink.EnqueueAsync(command, default);
+                if (!commit) throw new InvalidOperationException("Synthetic rollback.");
+                return true;
+            }, default));
+            Assert.Equal(commit, error is null);
         }
-        await worker.StopAsync();
-        await api.StopAsync();
-
-        // Wolverine validates every listener at startup and warns when both sides asked for different modes.
-        Assert.Contains(logs.Messages, m => m.Category.StartsWith("Wolverine", StringComparison.Ordinal));
-        Assert.DoesNotContain(logs.Messages, m => m.Text.Contains("Conflicting endpoint mode", StringComparison.Ordinal));
-        Assert.DoesNotContain(logs.Messages, m => m.Level >= LogLevel.Warning && m.Text.Contains("commands.", StringComparison.Ordinal));
+        await EnqueueAsync(commit: false);
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.Empty(wakeups);
+        await EnqueueAsync(commit: true);
+        await scope.EventuallyAsync(() => Task.FromResult(wakeups.Contains(scope.Owner)));
+        // The worker may request work too: there is no route that only the API may use.
+        await using (var owned = worker.Services.GetRequiredService<IOwnerScopeFactory>().Create(scope.Owner))
+            await owned.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+            {
+                await owned.Services.GetRequiredService<IMonitorCommandSink>().EnqueueAsync(command, default);
+                return true;
+            }, default);
+        await scope.EventuallyAsync(() => Task.FromResult(wakeups.Count(o => o == scope.Owner) == 2));
     }
 
     [PostgresFact]
@@ -244,7 +213,6 @@ public sealed class WorkerHostTests
             ["ConnectionStrings:Vessel"] = connection,
             ["Vessel:Auth:OwnerId"] = owner.ToString(),
             ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
-            ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
             ["Vessel:Monitor:HeartbeatFile"] = file
         }));
         builder.Logging.ClearProviders();
@@ -257,14 +225,7 @@ public sealed class WorkerHostTests
         return host;
     }
 
-    private static Wolverine.Configuration.Endpoint Endpoint(IHost host, Uri uri) =>
-        host.Services.GetRequiredService<IWolverineRuntime>().Options.Transports.TryGetEndpoint(uri)
-        ?? throw new InvalidOperationException($"No endpoint {uri}.");
-
-    private static Uri[] Routes(IHost host) => host.Services.GetRequiredService<IWolverineRuntime>()
-        .RoutingFor(typeof(MonitorAccountCommand)).Routes.OfType<MessageRoute>().Select(r => r.Uri).ToArray();
-
-    private static IHost Worker(BrokerScope broker, string module, string? deployment = null, ILoggerProvider? logs = null,
+    private static IHost Worker(DeliveryScope broker, string module, string? deployment = null, ILoggerProvider? logs = null,
         IJournalOwnerDirectory? owners = null, ConcurrentBag<Guid>? wakeups = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });

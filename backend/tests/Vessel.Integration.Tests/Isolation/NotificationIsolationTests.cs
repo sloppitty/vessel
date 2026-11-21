@@ -15,7 +15,6 @@ using Vessel.Messaging.Modules.Notifications;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
-using Wolverine;
 
 namespace Vessel.Tests.Isolation;
 
@@ -347,11 +346,8 @@ internal sealed class IsolationNotifications : IAsyncDisposable
         var before = await Notifications(owner.Id);
         var message = (await Events(owner.Id)).Last(e => e.Type == NotificationRules.TestType);
         Assert.Equal(owner.Id, message.OwnerId);
-        var topology = new MessagingTopology(new MessagingSettings(), new VesselModuleRegistry([module]));
-        await EventSubscriptionListener.Handle(message,
-            new Envelope { Destination = new Uri("rabbitmq://queue/" + topology.SubscriptionQueue(module.Subscriptions[0].Name)) },
-            new MessagingHost(NotificationsModule.ModuleName, [module]), topology, Scopes, directory,
-            NullLogger<EventSubscriptionHandlerLog>.Instance, default);
+        await new EventSubscriptionListener(new MessagingHost(NotificationsModule.ModuleName, [module]), Scopes, directory,
+            NullLogger<EventSubscriptionHandlerLog>.Instance).HandleAsync(message, default);
         return Assert.Single((await Notifications(owner.Id)).Except(before));
     }
 

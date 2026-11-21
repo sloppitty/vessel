@@ -61,6 +61,14 @@ The packaged run built local API/web images and fresh Compose projects with priv
 
 Each lower layer was also checked on its own: `stack/45` 2,057 backend tests and 1,800 frontend tests, `stack/46` 2,253 backend tests, all passing. The October 15 verification below predates the topic/subscription rework; its delivery statements (consumer delivery rows, republish) describe the replaced design.
 
+## Broker removal, November 20, 2026 (issue #99)
+
+Owner decision D61: RabbitMQ and Wolverine are removed; events and monitor requests stage a `pg_notify` in their own transaction and one listening connection per worker wakes the dispatcher or the scheduler. The delivery statements above (outbox, queues, broker outage, restore without the broker volume) describe the replaced transport. Verified on branch `fix/health-99-remove-broker`:
+
+- Integration (`Vessel_TEST_POSTGRES`, no broker): `VesselEventTransportTests` (notification committed with the event and dropped on rollback, settlement table through the listening connection, catch-up for notifications nobody heard, a killed listening connection reconnecting, live delivery of 20 events with p95 under 2 s, insert-only provisioning), `MultiOwnerMessagingTests`, `WorkerHostTests` (worker starts with only PostgreSQL and listens; monitor requests notify only on commit; unknown, suspended and unreadable commands dropped), `MonitorEndToEndTests` including `MonitorWithoutBrokerTests.cs` (API and monitor worker start with only PostgreSQL, a Check wakes the worker without a tick, a lost listener delays a Check to the next tick). These broker tests were opt-in before and now run with every database run. With the listener registration disabled, the live-delivery tests fail, so they test the notification path.
+- Receipt, catch-up and retention tests (`EventSubscriptionTests`, `EventSubscriptionPoisonTests`, `NotificationOwnerTests`, `MultiOwnerEventTests`) pass with their assertions unchanged, apart from settings that no longer exist and dead-letter wording.
+- Operator scripts: `deploy/vessel` leaves a 0.4.2 RabbitMQ container alone and refuses a rollback to 0.4.2 without its Compose files (`scripts/test_deploy_vessel.py`); the release check measures delivery latency, kills the verifier's listening connection, stops the Notification Hub and the verifier, and upgrades the previous release from its own broker deploy files.
+
 ## Current work
 
 - Sol implementers completed the five layers against [the shared API contract](play-monitor-api-contract.md).

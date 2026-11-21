@@ -9,11 +9,12 @@ Read-only; they never start, stop or migrate anything:
   preflight   The checks an upgrade or backup needs, with a non-zero exit when one fails. Add --to X for an upgrade.
 
 Changing; each prints its plan and does nothing without --yes. Each first stops every writer: every running container
-of the project except PostgreSQL, RabbitMQ and RustFS (API, all workers including notifications and paper, web, TLS
-and one-off runs), with no exceptions by name:
+of the project except PostgreSQL and RustFS (API, all workers including notifications and paper, web, TLS and
+one-off runs), with no exceptions by name. A RabbitMQ container left by 0.4.2 or earlier is not a writer either: it is
+left running, never started again, and removed by hand (deploy/README.md "Upgrade to 0.4.3"):
   backup      A new timestamped directory under backups/, never overwritten: both schemas (one pg_dump) and the
               evidence store (the whole stopped RustFS volume, or the local evidence volume). An external S3 bucket,
-              the credential key ring, .env and the RabbitMQ volume are not included. Restarts what was running.
+              the credential key ring and .env are not included. Restarts what was running.
   upgrade     --to X: back up (refusing to continue if that fails), set VESSEL_VERSION=X in .env, run the explicit
               migrate service and the post-steps of every release's upgrade manifest after the current version up
               to X (docs/releases/vX.Y.Z.upgrade.json, read from X's API image, or --manifest), then start what was
@@ -45,8 +46,13 @@ import subprocess
 import sys
 import tarfile
 
+# Stores of releases before this configuration, which no Vessel host uses any more: RabbitMQ until 0.4.2 (issue #99).
+# A container left running is never a writer, is not required in the configuration and is not started again.
+RETIRED_SERVICES = ('rabbitmq',)
+# The releases whose hosts still need RabbitMQ: a rollback to one needs that release's Compose files back first.
+LAST_BROKER_RELEASE = (0, 4, 2)
 # The stores themselves; never treated as writers. RustFS is stopped separately while its volume is archived.
-DATA_SERVICES = ('postgres', 'rabbitmq', 'rustfs')
+DATA_SERVICES = ('postgres', 'rustfs') + RETIRED_SERVICES
 # Hosts that only serve requests; stopped first and started last.
 FRONT_SERVICES = ('tls', 'web')
 API_DLL = '/app/Vessel.Api.dll'
@@ -457,6 +463,10 @@ def preflight_checks(stack, target, report):
     front, hosts = writers(containers)
     stopped = ', '.join(sorted({c.service for c in front + hosts})) or 'none running'
     report.ok(f'Writers a changing command stops first: {stopped}')
+    retired = sorted({c.service for c in containers if c.running and c.service in RETIRED_SERVICES} - set(services))
+    if retired:
+        report.warn(f'{", ".join(retired)} still runs but this configuration no longer uses it; it is left alone. Remove '
+                    'it once no rollback to 0.4.2 or earlier is needed (deploy/README.md "Upgrade to 0.4.3")')
     if not stack.postgres_running():
         report.fail(f'PostgreSQL is not running; start it with `{stack.compose_command("up", "-d", "--wait", "postgres")}`')
     image = stack.image('migrate')
@@ -568,9 +578,16 @@ def restart_services(containers):
     return sorted({c.service for c in containers if c.running and not c.oneoff})
 
 
+def startable(stack, services, version=None):
+    """Drops a retired store the configuration no longer defines: it is left as it runs, never started again."""
+    configured = set(stack.services(version))
+    return [s for s in services if s in configured or s not in RETIRED_SERVICES]
+
+
 def check_services_configured(stack, containers, version=None):
     """A running service the passed configuration does not define could be stopped but never started again."""
-    missing = sorted({c.service for c in containers if c.running and not c.oneoff} - set(stack.services(version)))
+    missing = sorted({c.service for c in containers if c.running and not c.oneoff} - set(stack.services(version))
+                     - set(RETIRED_SERVICES))
     if missing:
         raise Failure('Running services are not in the Compose configuration given to this command: ' +
                       ', '.join(missing) + '. Pass the same overlays and profiles (for example -f compose.paper.yaml '
@@ -733,8 +750,7 @@ def take_backup(stack, kind, services, version, extra=None):
             'version': version, 'images': stack.app_images(), 'services': services,
             'storage': {'kind': storage, 'archive': archive, 'entries': entries, 'volume': volume},
             'credentialRing': bool(stack.credential_ring()), 'migrations': applied, 'files': files,
-            'notIncluded': ['RabbitMQ volume (subscribers recover unsettled events from PostgreSQL)',
-                            'credential key ring (back it up separately)', '.env and operator settings'] +
+            'notIncluded': ['credential key ring (back it up separately)', '.env and operator settings'] +
                            (['the external S3 bucket (use the provider\'s backup)'] if storage == 'external' else []),
             **(extra or {})}
         with create(directory / MANIFEST) as out:
@@ -854,7 +870,7 @@ def backup(stack, args):
     try:
         stopped = stop_writers(stack, containers)
         try:
-            take_backup(stack, 'manual', restart_services(containers), running_version(stack, containers))
+            take_backup(stack, 'manual', startable(stack, restart_services(containers)), running_version(stack, containers))
         finally:
             start_containers(stack, stopped)
     finally:
@@ -980,7 +996,7 @@ def upgrade(stack, args):
     check_services_configured(stack, containers, target)
     current = running_version(stack, containers)
     manifests = upgrade_manifests(stack, args, current, target)
-    services = restart_services(containers)
+    services = startable(stack, restart_services(containers), target)
     missing = missing_images(stack, target)
     front, hosts = writers(containers)
     pending = compare_migrations(stack.known_migrations(stack.image('migrate', target)), stack.applied_migrations())
@@ -1139,6 +1155,9 @@ def rollback(stack, args):
     containers = stack.containers()
     current = running_version(stack, containers)
     check_services_configured(stack, containers, previous)
+    if release_key(previous) <= LAST_BROKER_RELEASE and 'rabbitmq' not in stack.services(previous):
+        raise Failure(f'{previous} needs RabbitMQ, which this configuration no longer defines. Put back that release\'s '
+                      'Compose files and the RABBITMQ_* lines of .env first (deploy/README.md "Upgrade to 0.4.3").')
     storage = stack.storage()[0]
     if storage != manifest['storage']['kind']:
         raise Failure(f'The backup holds {manifest["storage"]["kind"]} evidence but this configuration uses {storage}.')
@@ -1147,7 +1166,7 @@ def rollback(stack, args):
     check_space(stack)
     missing = missing_images(stack, previous)
     # A failed upgrade leaves the writers stopped: bring back what ran before it too.
-    services = sorted(set(restart_services(containers)) | set(manifest.get('services') or []))
+    services = startable(stack, sorted(set(restart_services(containers)) | set(manifest.get('services') or [])), previous)
     front, hosts = writers(containers)
     plan = ([f'Pull {", ".join(missing)}.'] if missing else []) + [
         f'Stop every writer: {names(front + hosts)} (stop API/worker replicas on other hosts yourself).',

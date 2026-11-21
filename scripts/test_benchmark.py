@@ -395,7 +395,7 @@ class SafetyTests(unittest.TestCase):
     def test_wallet_settings_have_an_https_origin_and_no_bearer_token(self):
         run = benchmark.Run(arguments(), log=lambda *_: None)
         run.owner = '00000000-0000-4000-8000-000000000001'
-        run.pg_port, run.mq_port = 1234, 5678
+        run.pg_port = 1234
         run.temp = Path('/tmp/isolated-benchmark-test')
         settings = run.settings()
         self.assertEqual('Production', settings['ASPNETCORE_ENVIRONMENT'])
@@ -417,7 +417,7 @@ class SafetyTests(unittest.TestCase):
 
     def test_a_chosen_cache_capacity_reaches_the_api_and_is_bounded(self):
         run = benchmark.Run(arguments(cache_capacity_mib=1024), log=lambda *_: None)
-        run.owner, run.pg_port, run.mq_port = '00000000-0000-4000-8000-000000000001', 1234, 5678
+        run.owner, run.pg_port = '00000000-0000-4000-8000-000000000001', 1234
         run.temp = Path('/tmp/isolated-benchmark-test')
         self.assertEqual(str(2 ** 30), run.settings()['Vessel__Activity__CacheCapacityBytes'])
         benchmark.check_arguments(arguments(cache_capacity_mib=1024), environ={})

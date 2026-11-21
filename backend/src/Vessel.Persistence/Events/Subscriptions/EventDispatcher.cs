@@ -29,7 +29,10 @@ public enum DispatchOutcome
 
 public readonly record struct DispatchResult(DispatchOutcome Outcome)
 {
-    /// <summary>Broker action for live delivery: dead-letter for diagnosis, otherwise acknowledge.</summary>
+    /// <summary>
+    /// Live delivery logs these at Warning for diagnosis (the name predates the broker's removal: there is no dead-letter
+    /// queue). The receipt, or its absence, is the record either way.
+    /// </summary>
     public bool DeadLetter => Outcome is DispatchOutcome.Failed or DispatchOutcome.InvalidOwner or DispatchOutcome.Unknown;
 }
 

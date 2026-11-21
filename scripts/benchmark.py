@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 2, item 14d: a synthetic multi-year Release benchmark of Vessel's heaviest reads.
 
-Starts its own throwaway PostgreSQL 18 and RabbitMQ containers, applies the migrations explicitly (check-config, identity,
+Starts its own throwaway PostgreSQL 18 container, applies the migrations explicitly (check-config, identity,
 journal, ensure-owner, provision-messaging, as deploy/migrate does), seeds one owner's deterministic synthetic journal with
 COPY, rebuilds the journal search projection with its offline command and starts the built API DLL in Release
 (Production, Wallet mode over loopback HTTPS, a synthetic operator session, no worker modules). It then times Activity, Review, the Plays
@@ -51,7 +51,6 @@ API_PROJECT = BACKEND / 'src' / 'Vessel.Api'
 API_BIN = API_PROJECT / 'bin' / 'Release' / 'net10.0'
 # The images the deployment Compose example pins.
 POSTGRES_IMAGE = 'postgres:18-alpine'
-RABBIT_IMAGE = 'rabbitmq:4.3.6-management'
 LABEL = 'vessel-bench.run'
 DATABASE = 'vessel_bench'
 UTC = timezone.utc
@@ -1581,7 +1580,7 @@ def check_arguments(args, environ=None):
     environ = os.environ if environ is None else environ
     if not args.disposable:
         raise Refused('Refusing to run: pass --disposable to confirm that this run may create, fill and then remove '
-                      'its own PostgreSQL and RabbitMQ containers. It never uses another database.')
+                      'its own PostgreSQL container. It never uses another database.')
     if any(environ.get(name) for name in ('CI', 'GITHUB_ACTIONS')):
         raise Refused('Refusing to run under CI: the benchmark is a manual measurement on a chosen host.')
     if not 0 < args.years <= 10 or not 0 < args.scale <= 20:
@@ -1605,13 +1604,13 @@ class Run:
     def __init__(self, args, log=print):
         self.args, self.log = args, log
         self.id = secrets.token_hex(4)
-        self.containers = {'postgres': f'vessel-bench-{self.id}-pg', 'rabbitmq': f'vessel-bench-{self.id}-mq'}
+        self.containers = {'postgres': f'vessel-bench-{self.id}-pg'}
         self.started = []
         self.api = None
         self.temp = None
-        self.pg_password, self.mq_password = secrets.token_hex(24), secrets.token_hex(24)
+        self.pg_password = secrets.token_hex(24)
         self.api_port = free_port()
-        self.secrets = {self.pg_password, self.mq_password}
+        self.secrets = {self.pg_password}
 
     def redact(self, text):
         text = str(text)
@@ -1631,23 +1630,18 @@ class Run:
 
     # -- containers ---------------------------------------------------------------------------------------------------
     def start_containers(self):
-        env = dict(os.environ, POSTGRES_PASSWORD=self.pg_password, RABBITMQ_DEFAULT_PASS=self.mq_password)
+        env = dict(os.environ, POSTGRES_PASSWORD=self.pg_password)
         label = f'{LABEL}={self.id}'
         for key, options, image in (
                 ('postgres', ['-e', 'POSTGRES_USER=vessel', '-e', f'POSTGRES_DB={DATABASE}', '-e', 'POSTGRES_PASSWORD',
-                              '-p', '127.0.0.1::5432'], POSTGRES_IMAGE),
-                ('rabbitmq', ['--hostname', 'vessel-bench-rabbitmq', '-e', 'RABBITMQ_DEFAULT_USER=bench',
-                              '-e', 'RABBITMQ_DEFAULT_PASS', '-p', '127.0.0.1::5672'], RABBIT_IMAGE)):
+                              '-p', '127.0.0.1::5432'], POSTGRES_IMAGE),):
             # Tracked before launch: a failed or interrupted `docker run` can still leave a created container.
             self.started.append(self.containers[key])
             self.run(['docker', 'run', '-d', '--rm', '--name', self.containers[key], '--label', label, *options, image],
                      env=env)
         self.pg_port = self.port(self.containers['postgres'], 5432)
-        self.mq_port = self.port(self.containers['rabbitmq'], 5672)
         self.wait('PostgreSQL', ['docker', 'exec', self.containers['postgres'], 'pg_isready', '-h', '127.0.0.1',
                                  '-U', 'vessel', '-d', DATABASE])
-        self.wait('RabbitMQ', ['docker', 'exec', self.containers['rabbitmq'], 'rabbitmq-diagnostics', '-q',
-                               'check_port_connectivity'])
 
     def port(self, container, port):
         output = self.run(['docker', 'port', container, f'{port}/tcp']).stdout
@@ -1698,7 +1692,6 @@ class Run:
             'Vessel__Auth__OwnerId': self.owner,
             'Vessel__Identity__Origins__0': self.origin,
             'Vessel__Identity__Registration': 'Closed',
-            'Vessel__Messaging__RabbitMqUri': f'amqp://bench:{self.mq_password}@127.0.0.1:{self.mq_port}/',
             'Vessel__Evidence__Storage__Provider': 'Local',
             'Vessel__Evidence__Storage__Local__RootPath': str(self.temp / 'evidence'),
             'DOTNET_CLI_TELEMETRY_OPTOUT': '1',
@@ -1982,7 +1975,7 @@ def report(meta, counts, endpoints):
         '',
         f'Host: {meta["host"]["cpu"]}, {meta["host"]["cpus"]} CPUs, {meta["host"]["memory_mb"]} MB RAM '
         f'({meta["host"]["available_mb"]} MB available at start), load {meta["host"]["load"]}, Linux '
-        f'{meta["host"]["kernel"]}. {meta["postgres"]} and {RABBIT_IMAGE} in throwaway containers; the API DLL built '
+        f'{meta["host"]["kernel"]}. {meta["postgres"]} in a throwaway container; the API DLL built '
         f'in Release (.NET {meta["dotnet"]}), Production/Wallet mode over loopback HTTPS, no worker modules, '
         f'on the same host. '
         f'API peak RSS {meta["api_rss_mb"]} MB; PostgreSQL container {meta["postgres_memory"]}.',
@@ -2040,7 +2033,7 @@ def report(meta, counts, endpoints):
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--disposable', action='store_true',
-                        help='required: this run creates, fills and removes its own PostgreSQL and RabbitMQ containers')
+                        help='required: this run creates, fills and removes its own PostgreSQL container')
     parser.add_argument('--seed', type=int, default=1, help='dataset seed (default 1)')
     parser.add_argument('--years', type=float, default=3, help='years of history (default 3)')
     parser.add_argument('--scale', type=float, default=1, help='volume multiplier; 1 is about 50,000 fills over 3 years')

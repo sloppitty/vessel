@@ -34,7 +34,10 @@ The top-level [`AGENTS.md`](../AGENTS.md) applies first. The operator guide is
   nginx overwrites forwarded claims. The Caddy TLS overlay unpublishes web and
   trusts only Caddy's pinned IP. Host-gateway trust is a weaker, documented opt-in.
 - PostgreSQL, evidence and credential-key mounts stay private (key files mode
-  600); the RabbitMQ management page binds to loopback.
+  600).
+- No message broker (issue #99): delivery is PostgreSQL `LISTEN/NOTIFY`, which a
+  transaction-pooling proxy does not pass. `deploy/vessel` treats a RabbitMQ left
+  by 0.4.2 as a retired store: never a writer, never started again.
 - A reverse proxy in front of Vessel must not replace its
   `Permissions-Policy: camera=(self)` header.
 - Registration stays `Closed` until the wallet acceptance checks pass and are
