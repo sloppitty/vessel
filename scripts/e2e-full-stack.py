@@ -977,9 +977,12 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.expect(orphan['severity'] == 'warning' and orphan['subject']['playId'] == self.p1, 'protection.orphaned (warning) for closed P1')
         missing = self.discrepancies(self.p2, 'protection.missing')
         self.expect(missing[0]['state'] in ('dismissed', 'resolved'), 'P2 dismissed discrepancy stays closed after the exit', missing)
-        # A one-hour WatchLifetime is the shortest allowed; age only this watch's start (synthetic time control).
+        # A one-hour WatchLifetime is the shortest allowed; age this watch's start (synthetic time control).
         # A watch identifies its order through its link; the link references the order by internal ID.
-        changed = self.sql('UPDATE monitor_exit_watches w SET "StartedAtUtc" = w."StartedAtUtc" - interval \'2 hours\' '
+        # The Play's end is aged with it: a watch whose start precedes its Play's end restarts from that end.
+        changed = self.sql('WITH play AS (UPDATE plays SET "EndedAtUtc" = "EndedAtUtc" - interval \'2 hours\' '
+                           f'WHERE "Id" = \'{self.p1}\' RETURNING "Id") '
+                           'UPDATE monitor_exit_watches w SET "StartedAtUtc" = w."StartedAtUtc" - interval \'2 hours\' '
                            'FROM play_order_links l JOIN imported_orders o ON o."OwnerId" = l."OwnerId" '
                            'AND o."AccountId" = l."AccountId" AND o."Id" = l."ImportedOrderId" '
                            f'WHERE l."Id" = w."LinkId" AND w."PlayId" = \'{self.p1}\' '

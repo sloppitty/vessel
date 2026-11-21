@@ -84,6 +84,14 @@ class FakeVenueModelTests(unittest.TestCase):
         self.assertTrue(all(float(c['h']) >= max(float(c['o']), float(c['c'])) and c['T'] == c['t'] + 3_599_999 for c in first))
         self.assertEqual(self.info('spotMeta')['tokens'][0]['tokenId'], fake_venue.USDC_TOKEN_ID)
 
+    def test_builder_catalogue_reads_answer_with_no_builder_dex(self):
+        # The Hyperliquid reader marks positions incomplete when any of these fails.
+        metas = self.venue.info({'type': 'allPerpMetas'})
+        self.assertEqual([m['collateralToken'] for m in metas], [0])
+        self.assertNotIn(':', ''.join(m['name'] for m in metas[0]['universe']))
+        self.assertEqual(self.venue.info({'type': 'perpDexs'}), [None])
+        self.assertEqual(self.venue.info({'type': 'perpConciseAnnotations'}), [])
+
     def test_scripted_failures_and_gate(self):
         self.venue.fail('userFills', 1, 503)
         self.assertEqual(self.venue.before('userFills', '10.0.0.1'), 503)

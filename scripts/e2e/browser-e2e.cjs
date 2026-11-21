@@ -62,9 +62,10 @@ async function main() {
   page.setDefaultTimeout(30_000)
   const errors = [], violations = []
   // Before sign-in, the sign-in screen's session probe answers 401, which Chromium logs as a failed load.
+  // HTTP/2 responses carry no reason phrase, so match the status code alone.
   let signedIn = false
   page.on('console', message => {
-    if (message.type() === 'error' && (signedIn || !/status of 401 \(Unauthorized\)/.test(message.text()))) errors.push(message.text())
+    if (message.type() === 'error' && (signedIn || !/status of 401 \(/.test(message.text()))) errors.push(message.text())
   })
   page.on('pageerror', error => errors.push(error.message))
   await page.exposeFunction('recordCspViolation', entry => violations.push(entry))
@@ -144,7 +145,8 @@ async function main() {
         await page.getByText('It does not change executions or stop checks', { exact: false }).waitFor()
         assert.equal(await item.getByRole('button', { name: 'Dismiss', exact: true }).count(), 0)
       })
-      const button = () => page.getByRole('region', { name: 'Background monitor', exact: true }).getByRole('button').first()
+      // The heading's "About check timing" tip is a button too; name the Check button in every state.
+      const button = () => page.getByRole('region', { name: 'Background monitor', exact: true }).getByRole('button', { name: /^(Check|Scheduled check|Account refresh)/ })
       const idle = () => page.getByRole('region', { name: 'Background monitor', exact: true }).getByRole('button', { name: 'Check', exact: true }).waitFor({ timeout: 90_000 })
       await step('Check is accepted (202), shows progress, completes via the stream and then counts down', async () => {
         await idle()
@@ -242,7 +244,7 @@ async function main() {
     await step('zero console errors, page errors, external requests and CSP violations', async () => {
       assert.deepEqual(violations, [], JSON.stringify(violations))
       // Chromium logs every non-2xx fetch; only the one deliberately provoked 429 is expected.
-      const provoked = errors.filter(e => /status of 429 \(Too Many Requests\)/.test(e))
+      const provoked = errors.filter(e => /status of 429 \(/.test(e))
       assert.ok(provoked.length <= (phase === 'live' ? 1 : 0), JSON.stringify(provoked))
       assert.deepEqual(errors.filter(e => !provoked.includes(e)), [], JSON.stringify(errors))
     })
