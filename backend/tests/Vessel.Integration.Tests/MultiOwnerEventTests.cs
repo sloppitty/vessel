@@ -17,7 +17,6 @@ using Vessel.Messaging.Modules.Verification;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
-using Wolverine;
 using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
@@ -57,18 +56,15 @@ public sealed class MultiOwnerEventTests
         await using var runtime = await OwnerEventRuntime.CreateAsync(subscription: module.Subscriptions.Single());
         await runtime.RegisterAsync();
         var message = await runtime.AppendAsync(runtime.Second, "directory-outage");
-        var topology = new MessagingTopology(new(), new VesselModuleRegistry([module]));
         var host = new MessagingHost("verification", [module]);
         runtime.Directory.Checking = (_, _) => throw new InvalidOperationException("Synthetic private directory failure");
-        await EventSubscriptionListener.Handle(message,
-            new Envelope { Destination = new Uri("rabbitmq://queue/" + topology.SubscriptionQueue(runtime.Subscription.Name)) },
-            host, topology, runtime.Scopes, runtime.Directory,
-            runtime.Services.GetRequiredService<ILogger<EventSubscriptionHandlerLog>>(), default);
+        await new EventSubscriptionListener(host, runtime.Scopes, runtime.Directory,
+            runtime.Services.GetRequiredService<ILogger<EventSubscriptionHandlerLog>>()).HandleAsync(message, default);
         Assert.Empty(await runtime.StatusAsync(runtime.Second));
         Assert.Equal(0, await runtime.CountAsync("SELECT count(*) FROM event_receipts"));
         Assert.Equal([runtime.Second], await runtime.Store.CatchUpOwnersAsync(runtime.Subscription, null, runtime.Clock.GetUtcNow(), default));
         Assert.Contains(runtime.Logs.Messages, m => m.Level == LogLevel.Warning &&
-            m.Text.Contains("acknowledged after InvalidOperationException", StringComparison.Ordinal));
+            m.Text.Contains("not delivered live after InvalidOperationException", StringComparison.Ordinal));
         Assert.DoesNotContain(runtime.Logs.Messages, m => m.Text.Contains("Synthetic private", StringComparison.Ordinal));
         runtime.Directory.Checking = null;
         runtime.Clock.Advance(TimeSpan.FromMinutes(1));

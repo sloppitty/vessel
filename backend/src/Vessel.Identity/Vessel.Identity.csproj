@@ -9,5 +9,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" PrivateAssets="all" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="Nethereum.Signer" Version="7.0.0" />
+    <!-- Nethereum accepts Newtonsoft.Json from 11.0.2, which has a known vulnerability; WolverineFx used to lift it. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 </Project>

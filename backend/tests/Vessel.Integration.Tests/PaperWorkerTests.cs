@@ -23,6 +23,7 @@ public sealed class PaperWorkerTests
         Assert.Contains(builder.Services, x => x.ServiceType == typeof(IPaperTradingService));
         Assert.Contains(builder.Services, x => x.ServiceType == typeof(IHostedService) && x.ImplementationType == typeof(PaperScheduler));
         Assert.DoesNotContain(builder.Services, x => x.ServiceType == typeof(MessagingHost));
+        Assert.DoesNotContain(builder.Services, x => x.ImplementationType == typeof(PostgresNotificationListener));
         Assert.Equal("/tmp/vessel-paper-heartbeat", PaperWorkerOptions.From(builder.Configuration).HeartbeatFile);
     }
 

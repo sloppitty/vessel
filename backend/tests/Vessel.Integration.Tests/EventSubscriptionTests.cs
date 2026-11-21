@@ -610,14 +610,10 @@ public sealed partial class EventSubscriptionTests
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Vessel:Messaging:RabbitMqUri"] = "amqp://synthetic:synthetic@127.0.0.1:1",
-            ["Vessel:Messaging:StorageSchemas:api"] = "wolverine_custom",
+            ["Vessel:Messaging:Verification"] = "true",
             ["Vessel:Events:DurableConsumers:0"] = "discord"
         }).Build();
-        var settings = MessagingHosting.Settings(config);
-        Assert.Equal(new Dictionary<string, string> { ["api"] = "wolverine_custom" }, settings.StorageSchemas);
-        Assert.Equal(("wolverine_custom", "wolverine_monitor"), (settings.SchemaFor("api"), settings.SchemaFor("monitor")));
-        Assert.Equal(20, settings.DeliveryLimit);
+        Assert.True(MessagingHosting.Settings(config).Verification);
         foreach (var type in new[] { typeof(MessagingSettings), typeof(VesselEventSettings) })
             Assert.DoesNotContain(type.GetProperties(), p => p.PropertyType.IsArray ||
                 p.PropertyType.IsGenericType && p.PropertyType.GetGenericTypeDefinition() == typeof(List<>));

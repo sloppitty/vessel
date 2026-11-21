@@ -274,7 +274,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         services.AddLogging();
         services.AddSingleton<IJournalOwnerContext>(new CoreOwner(owner));
         services.AddVesselPersistence(config);
-        services.AddVesselEvents(config); // No Wolverine host/runtime or broker connection.
+        services.AddVesselEvents(config); // No listening connection.
         await using var provider = services.BuildServiceProvider();
         await using var reading = provider.CreateAsyncScope();
         var reader = reading.ServiceProvider.GetRequiredService<IVesselEventReader>();

@@ -10,7 +10,7 @@ public enum EventHandling
 
 /// <summary>
 /// A subscription's handler. It runs inside the dispatcher's database transaction, so its effects must be
-/// database-only and idempotent on the event ID; the receipt settles with them. It never sees broker types.
+/// database-only and idempotent on the event ID; the receipt settles with them. It never sees transport types.
 /// Throw <see cref="TerminalEventException"/> for a permanent failure; any other exception is retried.
 /// </summary>
 public interface IVesselEventSubscriber

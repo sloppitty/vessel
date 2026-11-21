@@ -74,7 +74,7 @@ public sealed class AccountOrderHistoryApiTests
         Assert.NotEqual(Guid.Empty, request.RequestId);
         Assert.Equal("pending", request.Monitor.ManualState);
         // The HTTP route only admits work. Exercise the production worker claim/executor in a fresh
-        // scope with the injected synthetic venue; real broker dispatch has its own host E2E tests.
+        // scope with the injected synthetic venue; live delivery has its own host E2E tests.
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(factory.Services.GetRequiredService<IConfiguration>());
         WorkerHost.Configure(builder);

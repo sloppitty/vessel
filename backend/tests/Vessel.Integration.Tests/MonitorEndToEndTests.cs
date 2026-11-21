@@ -33,14 +33,14 @@ using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
-// Broker tests share one disposable RabbitMQ; each fixture uses its own topology prefix and envelope schemas.
+// Delivery tests listen on PostgreSQL channels scoped to their own schema; they run one at a time to keep timings stable.
 [CollectionDefinition("Monitor transport", DisableParallelization = true)]
 public sealed class MonitorTransportCollection;
 
 [Collection("Monitor transport")]
 public sealed partial class MonitorEndToEndTests
 {
-    [VesselEventRabbitFact]
+    [VesselEventPostgresFact]
     public async Task Hosted_scheduler_imports_partial_full_and_stop_fills_without_a_browser_and_restarts_without_duplicates()
     {
         await using var fixture = await MonitorFixture.StartAsync();
@@ -118,8 +118,8 @@ public sealed partial class MonitorEndToEndTests
         Assert.Equal(6, fixture.Venue.AccountReads);
     }
 
-    [VesselEventRabbitFact]
-    public async Task Http_check_runs_real_broker_handler_and_enforces_busy_failed_cooldown_and_owner_routes()
+    [VesselEventPostgresFact]
+    public async Task Http_check_runs_the_real_command_listener_and_enforces_busy_failed_cooldown_and_owner_routes()
     {
         await using var fixture = await MonitorFixture.StartAsync();
         using var client = fixture.ApiClient();
@@ -204,7 +204,7 @@ public sealed partial class MonitorEndToEndTests
 
     // The browser guards (frontend/src/api/monitor.ts, plays.ts) validate this real HTTP JSON in
     // frontend/src/test/contracts/monitor-contract.test.ts. Regenerate with VESSEL_UPDATE_CONTRACT_FIXTURES=1.
-    [VesselEventRabbitFact]
+    [VesselEventPostgresFact]
     public async Task Monitor_http_json_matches_the_browser_contract_fixture()
     {
         await using var fixture = await MonitorFixture.StartAsync();
@@ -362,13 +362,9 @@ public sealed partial class MonitorEndToEndTests
         private Guid EthPlay { get; set; }
         public TestClock Clock { get; } = new();
         public SyntheticVenue Venue { get; private set; } = null!;
-        private readonly string id = Guid.NewGuid().ToString("N")[..12];
-        private string Schema(string deployment) => $"e2e_{deployment}_{id}";
-        private static readonly string[] Deployments =
-            [MessagingHosting.ApiDeployment, MonitorModule.ModuleName, VerificationModule.ModuleName];
         private readonly string heartbeat = Path.Combine(Path.GetTempPath(), "vessel-e2e-" + Guid.NewGuid().ToString("N"));
         private Dictionary<string, string?> config = null!;
-        /// <summary>The configuration of the worker and the API: <see cref="config"/>, possibly with another broker URI.</summary>
+        /// <summary>The configuration of the worker and the API: <see cref="config"/>, possibly with other settings.</summary>
         private Dictionary<string, string?> HostConfig { get; set; } = null!;
         private IHost? worker;
         private IHost? verification;
@@ -382,6 +378,7 @@ public sealed partial class MonitorEndToEndTests
                 fixture.worker = fixture.BuildWorker();
                 fixture.api = new(fixture.HostConfig, fixture.Clock, fixture.Venue, fixture.Owner);
                 await fixture.worker.StartAsync();
+                await ListeningAsync(fixture.worker);
                 await fixture.WaitForRunAsync(1);
                 Assert.Equal("live", (await fixture.MonitorAsync()).State);
                 return fixture;
@@ -394,10 +391,9 @@ public sealed partial class MonitorEndToEndTests
         }
 
         /// <summary>
-        /// Seeds, provisions and starts the verification subscriber against the real broker, but neither the worker nor
-        /// the API. <paramref name="hostBroker"/> replaces the broker URI that only the worker and API use.
+        /// Seeds, provisions and starts the verification subscriber, but neither the worker nor the API.
         /// </summary>
-        public static async Task<MonitorFixture> PrepareAsync(string? hostBroker = null)
+        public static async Task<MonitorFixture> PrepareAsync()
         {
             var fixture = new MonitorFixture(await CoreDatabase.CreateAsync());
             try
@@ -408,20 +404,17 @@ public sealed partial class MonitorEndToEndTests
                     ["ConnectionStrings:Vessel"] = fixture.Database.ConnectionString,
                     ["Vessel:Auth:OwnerId"] = fixture.Owner.ToString(),
                     ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
-                    ["Vessel:Messaging:RabbitMqUri"] = Environment.GetEnvironmentVariable("Vessel_TEST_EVENT_RABBIT"),
-                    ["Vessel:Messaging:Prefix"] = "e2e" + fixture.id,
                     ["Vessel:Messaging:Verification"] = "true",
                     ["Vessel:Monitor:HeartbeatFile"] = fixture.heartbeat
                 };
-                foreach (var deployment in Deployments)
-                    fixture.config[$"Vessel:Messaging:StorageSchemas:{deployment}"] = fixture.Schema(deployment);
                 await fixture.SeedAsync();
                 await MessagingProvisioning.ProvisionAsync(new ConfigurationBuilder().AddInMemoryCollection(fixture.config).Build(), default);
                 // A verification subscription proves every committed event is delivered once to a subscriber.
                 fixture.verification = fixture.BuildVerification();
                 await fixture.verification.StartAsync();
+                // Live delivery needs the subscriber listening before the first event commits; catch-up does not run here.
+                await ListeningAsync(fixture.verification);
                 fixture.HostConfig = new(fixture.config);
-                if (hostBroker is not null) fixture.HostConfig["Vessel:Messaging:RabbitMqUri"] = hostBroker;
                 return fixture;
             }
             catch
@@ -430,6 +423,10 @@ public sealed partial class MonitorEndToEndTests
                 throw;
             }
         }
+
+        private static Task ListeningAsync(IHost host) => Eventually(() => Task.FromResult(
+            host.Services.GetServices<IHostedService>().OfType<PostgresNotificationListener>().Single().Connections > 0),
+            "The host's listening connection did not subscribe.");
 
         private IHost BuildWorker(ILoggerProvider? logs = null)
         {
@@ -583,23 +580,6 @@ public sealed partial class MonitorEndToEndTests
             return Convert.ToInt64(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture) == count;
         }, "Worker did not acknowledge every business EventId exactly once.");
 
-        private async Task DeleteTopologyAsync()
-        {
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(config).Build();
-            var settings = MessagingHosting.Settings(configuration);
-            var topology = new MessagingTopology(settings, VesselModuleRegistry.From(settings));
-            var factory = new RabbitMQ.Client.ConnectionFactory { Uri = settings.BrokerUri() };
-            await using var connection = await factory.CreateConnectionAsync();
-            await using var channel = await connection.CreateChannelAsync();
-            foreach (var queue in new[] { topology.CommandQueue(MonitorModule.ModuleName), topology.SubscriptionQueue(VerificationModule.SubscriptionName) })
-            {
-                await channel.QueueDeleteAsync(queue, false, false);
-                await channel.QueueDeleteAsync(MessagingTopology.DeadLetterQueue(queue), false, false);
-                await channel.ExchangeDeleteAsync(MessagingTopology.DeadLetterExchange(queue), false);
-            }
-            await channel.ExchangeDeleteAsync(topology.EventExchange, false);
-        }
-
         public async ValueTask DisposeAsync()
         {
             if (api is not null) await api.DisposeAsync();
@@ -608,14 +588,6 @@ public sealed partial class MonitorEndToEndTests
                 if (host is null) continue;
                 await host.StopAsync();
                 host.Dispose();
-            }
-            await DeleteTopologyAsync();
-            await using var connection = new NpgsqlConnection(Database.ConnectionString);
-            await connection.OpenAsync();
-            foreach (var deployment in Deployments)
-            {
-                await using var drop = new NpgsqlCommand($"DROP SCHEMA IF EXISTS {Schema(deployment)} CASCADE", connection);
-                await drop.ExecuteNonQueryAsync();
             }
             File.Delete(heartbeat);
             await Database.DisposeAsync();

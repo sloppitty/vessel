@@ -114,7 +114,6 @@ public sealed class HostCompositionTests
             ["ConnectionStrings:Vessel"] = UnusedDatabase,
             ["Vessel:Auth:OwnerId"] = owner.ToString(),
             ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
-            ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
             ["Vessel:Messaging:Verification"] = "true",
             ["Vessel:Monitor:HeartbeatFile"] = Path.Combine(Path.GetTempPath(), "vessel-composition-test-" + Guid.NewGuid().ToString("N"))
         };

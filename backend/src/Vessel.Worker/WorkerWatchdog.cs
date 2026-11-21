@@ -45,7 +45,7 @@ public sealed record WatchedModule(string Name, TimeSpan StaleAfter);
 /// Stops the worker with exit code <see cref="WorkerExit.StaleCode"/> when a watched module has made no progress for
 /// its threshold, so the container's restart policy starts a fresh process. The health check alone only marks the
 /// container unhealthy, which Compose never acts on. A module that never made progress is measured from the
-/// watchdog's start, which follows every other hosted service's start (including the broker connection).
+/// watchdog's start, which follows every other hosted service's start.
 /// </summary>
 public sealed class WorkerWatchdog(WorkerProgress progress, IReadOnlyList<WatchedModule> modules, TimeProvider time,
     IHostApplicationLifetime lifetime, WorkerExit exit, ILogger<WorkerWatchdog> logger) : BackgroundService

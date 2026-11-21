@@ -4,56 +4,53 @@ using Vessel.Application.Events;
 using Vessel.Application.Ownership;
 using Vessel.Messaging;
 using Vessel.Messaging.Modules.Verification;
+using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
-using Wolverine;
 
 namespace Vessel.Tests;
 
 [Collection("Monitor transport")]
 public sealed class MultiOwnerMessagingTests
 {
-    [VesselEventRabbitFact]
-    public async Task Provisioned_listener_dispatches_new_owners_dead_letters_unknown_and_acks_suspension_without_receipts()
+    [VesselEventPostgresFact]
+    public async Task Provisioned_listener_dispatches_new_owners_ignores_unknown_and_skips_suspension_without_receipts()
     {
-        await using var broker = await BrokerScope.CreateAsync();
+        await using var scope = await DeliveryScope.CreateAsync();
         var owners = new MutableOwnerDirectory();
-        owners.Set(broker.Owner, JournalOwnerStatus.Active);
+        owners.Set(scope.Owner, JournalOwnerStatus.Active);
         var secondOwner = Guid.NewGuid();
         owners.Set(secondOwner, JournalOwnerStatus.Active);
-        broker.Owners = owners;
-        var provision = await broker.ProvisionAsync();
+        scope.Owners = owners;
+        var provision = await scope.ProvisionAsync();
         Assert.Contains(VerificationModule.SubscriptionName, provision.Registered);
-        Assert.Equal(0, await broker.CountAsync("SELECT count(*) FROM event_subscriptions"));
-        var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
-        var worker = await broker.StartAsync(VerificationModule.ModuleName, VerificationModule.ModuleName);
-        var first = await broker.AppendAsync(api, Draft("first"));
-        var second = await broker.AppendAsync(api, Draft("second"), secondOwner);
-        await broker.EventuallyAsync(async () => await broker.ReceiptAsync("verification", first.Id) == ("delivered", 1) &&
-            await broker.ReceiptAsync("verification", second.Id) == ("delivered", 1));
-        Assert.Equal(2, await broker.CountAsync("SELECT count(*) FROM event_subscriptions"));
-        var bus = api.Services.GetRequiredService<IMessageBus>();
-        var queue = broker.Topology.SubscriptionQueue("verification");
+        Assert.Equal(0, await scope.CountAsync("SELECT count(*) FROM event_subscriptions"));
+        var api = await scope.StartAsync(MessagingHosting.ApiDeployment);
+        var worker = await scope.StartAsync(VerificationModule.ModuleName, VerificationModule.ModuleName);
+        var first = await scope.AppendAsync(api, Draft("first"));
+        var second = await scope.AppendAsync(api, Draft("second"), secondOwner);
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync("verification", first.Id) == ("delivered", 1) &&
+            await scope.ReceiptAsync("verification", second.Id) == ("delivered", 1));
+        Assert.Equal(2, await scope.CountAsync("SELECT count(*) FROM event_subscriptions"));
         var unknown = second with { Id = Guid.CreateVersion7(), OwnerId = Guid.NewGuid() };
-        await bus.BroadcastToTopicAsync(unknown.Type, unknown);
-        await broker.EventuallyAsync(async () => await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)) == 1);
+        await scope.NotifyAsync(VesselNotifications.Events, VesselNotifications.EventPayload(unknown));
         owners.Set(secondOwner, JournalOwnerStatus.Suspended);
-        var skipped = await broker.AppendAsync(api, Draft("suspended"), secondOwner);
-        // A later delivery is a barrier proving the inline consumer passed the suspended delivery.
-        var barrier = await broker.AppendAsync(api, Draft("barrier"));
-        await broker.EventuallyAsync(async () => await broker.ReceiptAsync("verification", barrier.Id) == ("delivered", 1));
+        var skipped = await scope.AppendAsync(api, Draft("suspended"), secondOwner);
+        // A later delivery is a barrier proving the listener passed the unknown and suspended notifications.
+        var barrier = await scope.AppendAsync(api, Draft("barrier"));
+        await scope.EventuallyAsync(async () => await scope.ReceiptAsync("verification", barrier.Id) == ("delivered", 1));
         await worker.StopAsync();
-        Assert.Null(await broker.ReceiptAsync("verification", skipped.Id));
-        Assert.Equal(0u, await broker.ReadyAsync(queue));
-        Assert.Equal(1u, await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)));
+        Assert.Null(await scope.ReceiptAsync("verification", skipped.Id));
+        Assert.Null(await scope.ReceiptAsync("verification", unknown.Id));
+        Assert.Equal(0, await scope.CountAsync($"SELECT count(*) FROM event_subscriptions WHERE owner_id='{unknown.OwnerId}'"));
         owners.Set(secondOwner, JournalOwnerStatus.Active);
-        await broker.ExecuteAsync("UPDATE events SET detected_at=detected_at-interval '1 minute'");
-        await using (var scope = worker.Services.GetRequiredService<IOwnerScopeFactory>().Create(secondOwner))
-            await scope.Services.GetRequiredService<EventCatchUp>().RunAsync(
+        await scope.ExecuteAsync("UPDATE events SET detected_at=detected_at-interval '1 minute'");
+        await using (var owned = worker.Services.GetRequiredService<IOwnerScopeFactory>().Create(secondOwner))
+            await owned.Services.GetRequiredService<EventCatchUp>().RunAsync(
                 new("verification", "verification", ["#"]), default);
-        Assert.Equal(("delivered", 1), await broker.ReceiptAsync("verification", skipped.Id));
-        Assert.True(await MessagingProvisioning.DeregisterAsync(broker.Configuration, "verification", default));
+        Assert.Equal(("delivered", 1), await scope.ReceiptAsync("verification", skipped.Id));
+        Assert.True(await MessagingProvisioning.DeregisterAsync(scope.Configuration, "verification", default));
         foreach (var table in new[] { "event_subscription_registrations", "event_subscriptions", "event_receipts" })
-            Assert.Equal(0, await broker.CountAsync("SELECT count(*) FROM " + table));
+            Assert.Equal(0, await scope.CountAsync("SELECT count(*) FROM " + table));
     }
 
     private static VesselEventDraft Draft(string key) => new("monitor.state-changed", Guid.CreateVersion7(), key,

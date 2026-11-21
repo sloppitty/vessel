@@ -29,10 +29,9 @@ public sealed class ArchitectureTests
             Assert.Empty(xml.Descendants("PackageReference"));
             Assert.Empty(xml.Descendants("FrameworkReference"));
         }
-        // Wolverine and RabbitMQ live in the one messaging adapter, never in the business layers or Persistence.
+        // Issue #99: delivery is PostgreSQL LISTEN/NOTIFY. No project brings back a broker or its framework.
         var packages = xml.Descendants("PackageReference").Select(x => x.Attribute("Include")!.Value).ToArray();
-        if (project is not "Messaging")
-            Assert.DoesNotContain(packages, p => p.StartsWith("WolverineFx", StringComparison.OrdinalIgnoreCase) ||
-                p.StartsWith("RabbitMQ", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(packages, p => p.StartsWith("WolverineFx", StringComparison.OrdinalIgnoreCase) ||
+            p.StartsWith("RabbitMQ", StringComparison.OrdinalIgnoreCase));
     }
 }

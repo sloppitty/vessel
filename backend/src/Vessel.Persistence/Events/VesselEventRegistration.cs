@@ -11,8 +11,8 @@ namespace Vessel.Persistence.Events;
 public static class VesselEventRegistration
 {
     /// <summary>
-    /// The event log, browser reader and subscription runtime. No transport: a host adds the outbox through
-    /// Vessel.Messaging, and read paths resolve without it.
+    /// The event log, browser reader, subscription runtime and the <c>pg_notify</c> outbox. Listening is the
+    /// worker's job (Vessel.Messaging); read paths never resolve the outbox.
     /// </summary>
     public static IServiceCollection AddVesselEvents(this IServiceCollection services, IConfiguration config)
     {
@@ -22,6 +22,7 @@ public static class VesselEventRegistration
             .ValidateOnStart();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddScoped<VesselEventMutationCapture>();
+        services.TryAddScoped<IVesselEventOutbox, PostgresNotificationOutbox>();
         services.TryAddScoped<VesselEventStore>();
         services.TryAddScoped<IVesselEventSink>(sp => sp.GetRequiredService<VesselEventStore>());
         services.TryAddScoped<IMonitorCommandSink>(sp => sp.GetRequiredService<VesselEventStore>());

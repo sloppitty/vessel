@@ -49,8 +49,12 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Identity/IdentityTransaction.cs|412856c9009c100267bcaed2ee98f7bd0fadcb134bbb68fd42b5070d64427a34",
             // Identity-schema user row lock by parameterized user ID; no journal tables are accessed.
             "Vessel.Identity/IdentityTransaction.cs|e4012de46b9a1236d2044f1cb200566ccf1334562c5e9f4aecdf08440632800b",
-            "Vessel.Messaging/MessagingDeployments.cs|7cef9def011385ddc17e6a8b4adb587d48f430370a1b13ad73d8395985ec579b",
-            "Vessel.Messaging/MessagingDeployments.cs|a16bdafb912a647befee6a34e34df9a2211d16df05d1454b8f9d412ff1e241ae",
+            // Issue #99: the listening connection names its channels from current_schema(), LISTENs on them and pings
+            // with SELECT 1; the outbox's pg_notify carries IDs and a type only. None of them reads or writes a row.
+            "Vessel.Messaging/PostgresNotificationListener.cs|42b6ac98a192cffe0d1cb81a15b69c40cf518b94c75d58b43ebaf6628d82b990",
+            "Vessel.Messaging/PostgresNotificationListener.cs|d665803d10e6551a5bbad585806cd484e51be212f7b725a99320d192c143b216",
+            "Vessel.Messaging/PostgresNotificationListener.cs|e004ebd5b5532a4b85984a62f8ad48a81aa3460c1ca07701f386135d72cdecf5",
+            "Vessel.Persistence/Events/VesselNotifications.cs|42e668dabd3932eff7ae6cd00f7feded6c34f7f4c491eb942203ccc7bb85cdd3",
             "Vessel.Persistence/DiaryStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/Events/EventRetention.cs|05f8fdd414fdbae35682179a42f93c4155253edbfa66a0cbc539f9699a93bc96",
             "Vessel.Persistence/Events/EventStreamEpoch.cs|6b5c6a08e6efcc41d3867d722197a1f8c7afed5900c702f3305cd90c32078937",
@@ -212,7 +216,7 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Api/EvidenceCopyCommand.cs|8b086bac7175c730c31e07567d55a49b05eab5ca83438af19bf3dd9fa8fe784f",
             "Vessel.Api/EvidenceCopyCommand.cs|cbc5c851f0dc70798f98079151240ea7ac2441729b0d45a86a994572a735efd6",
             // Not SQL: messaging command usage text ("--owner", "--all-owners" and the word "retry").
-            "Vessel.Messaging/MessagingCommands.cs|ebacba1d8076b46e61466ea17e85b43e964482d9807da0c86c6a8b19a113ee68",
+            "Vessel.Messaging/MessagingCommands.cs|59faf7254cba15bcf6ffb43169eedd7b5f9831dd50fe066f3da8ac0c13b47c94",
             // Not SQL: "reset" stream status value and feed cursor parameter name.
             "Vessel.Api/VesselEventEndpoints.cs|01be30bb4a27765c37462e6bf2a0bf8b6c109f9be9d81e6fd56455db1a736a43",
             "Vessel.Persistence/Notifications/NotificationStore.cs|01be30bb4a27765c37462e6bf2a0bf8b6c109f9be9d81e6fd56455db1a736a43",
@@ -235,7 +239,7 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Identity/IdentityDbContext.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             "Vessel.Persistence/VesselDbContextFactory.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             // Not SQL: check-config usage text ("--Vessel:Key=value" and the word "do").
-            "Vessel.Api/ConfigurationCheckCommand.cs|6b2800edbcdbc02cc269ece1fc14dc17eb65509e769b341b8c0807731ff6a605",
+            "Vessel.Api/ConfigurationCheckCommand.cs|6f6e358b92bc3270c459537fd7bbde77629d8578bedc74d61b2c32eac7bcd8c9",
             // Issue #106: session settings only (lock_timeout/statement_timeout lifted for one transaction, statement or session,
             // and restored); they read and write no rows.
             "Vessel.Persistence/DatabaseLimits.cs|356dcdca767da41cf842c7c389614cc17ed3d6ab3d743c7e15d7b188a4a2ff0f",

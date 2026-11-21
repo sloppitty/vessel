@@ -21,7 +21,7 @@ internal static class WorkerProgram
     {
         try
         {
-            // Keep --modules as a convenient explicit standalone selector without changing transport deployments.
+            // Keep --modules as a convenient explicit standalone selector.
             var normalized = args.Select(x => x == "--modules" ? "--Vessel:Worker:Modules:0" : x).ToArray();
             var builder = Host.CreateApplicationBuilder(normalized);
             WorkerHost.Configure(builder);
@@ -38,9 +38,9 @@ internal static class WorkerProgram
         }
         catch (Exception error)
         {
-            // Startup failures can contain database/broker connection strings. Only the type name is printed.
+            // Startup failures can contain database connection strings. Only the type name is printed.
             Console.Error.WriteLine($"Vessel worker could not start ({error.GetType().Name}). Check private configuration, " +
-                "the module list, explicit migrations and messaging provisioning.");
+                "the module list and explicit migrations.");
             return 1;
         }
     }
@@ -72,7 +72,7 @@ internal static class WorkerProgram
 
 /// <summary>
 /// <c>Vessel:Worker</c>: the modules this worker runs (default <c>["monitor"]</c>) and its logical deployment, which
-/// names its envelope schema and service (default: the first module). Replicas of one deployment share its schema.
+/// names its heartbeat and listening connection (default: the first module). Replicas share a deployment.
 /// </summary>
 public sealed class WorkerSettings
 {
@@ -120,7 +120,7 @@ public static class WorkerHost
         if (worker.Modules.Contains("paper", StringComparer.Ordinal))
         {
             if (worker.Modules.Count != 1 || worker.Deployment != "paper")
-                throw new InvalidOperationException("Paper is a standalone module and deployment; it cannot be combined with transport modules.");
+                throw new InvalidOperationException("Paper is a standalone module and deployment; it cannot be combined with other modules.");
             builder.Services.AddSingleton(worker);
             builder.Services.AddVesselInfrastructure(builder.Configuration);
             Vessel.Identity.DependencyInjection.AddVesselIdentityDirectory(builder.Services, builder.Configuration);
@@ -148,7 +148,7 @@ public static class WorkerHost
         AddWatchdog(builder.Services, worker);
     }
 
-    /// <summary>Registered last, so its clock starts once every other hosted service, the broker included, has started.</summary>
+    /// <summary>Registered last, so its clock starts once every other hosted service has started.</summary>
     private static void AddWatchdog(IServiceCollection services, WorkerSettings worker)
     {
         services.AddSingleton<WorkerProgress>();

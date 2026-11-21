@@ -664,7 +664,6 @@ public sealed class MultiOwnerWorkerTests
                 ["ConnectionStrings:Vessel"] = database.ConnectionString,
                 ["Vessel:Auth:OwnerId"] = First.ToString(),
                 ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
-                ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
                 ["Vessel:Monitor:HeartbeatFile"] = Heartbeat,
                 ["Vessel:Monitor:WorkerConcurrency"] = concurrency.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Vessel:Monitor:VenueReadConcurrency"] = venueConcurrency.ToString(System.Globalization.CultureInfo.InvariantCulture)
