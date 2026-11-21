@@ -246,6 +246,15 @@ class FakeHyperliquid:
             if kind == 'spotMeta':
                 return {'tokens': [{'name': 'USDC', 'szDecimals': 8, 'weiDecimals': 8, 'index': 0, 'tokenId': USDC_TOKEN_ID,
                                     'isCanonical': True, 'evmContract': None, 'fullName': None}], 'universe': []}
+            # Builder (HIP-3) catalogue as the real API answers with no builder DEX: allPerpMetas lists the primary DEX
+            # only, perpDexs has its null placeholder, no annotations.
+            if kind == 'allPerpMetas':
+                return [{'universe': [{k: m[k] for k in ('name', 'szDecimals', 'maxLeverage')} for m in self.universe],
+                         'marginTables': [], 'collateralToken': 0}]
+            if kind == 'perpDexs':
+                return [None]
+            if kind == 'perpConciseAnnotations':
+                return []
             if kind == 'candleSnapshot':
                 return self._candles(body['req'])
             account = self.account(body['user'])
