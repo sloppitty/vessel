@@ -174,7 +174,8 @@ class ChangelogFreezeTests(unittest.TestCase):
         for key, value in (('user.email', 'test@example.invalid'), ('user.name', 'Test'),
                            ('commit.gpgsign', 'false'), ('tag.gpgsign', 'false')):
             self.git('config', key, value)
-        write_release(self.root, version='1.2.2')
+        # The earlier release's manifest lists no migration, so the next one may list the fixture's.
+        write_release(self.root, version='1.2.2', **{'docs/releases/v1.2.2.upgrade.json': upgrade_manifest('1.2.2')})
         self.commit('chore(release): prepare v1.2.2 (#9)')
         self.git('tag', '-a', 'v1.2.2', '-m', 'v1.2.2')
 
