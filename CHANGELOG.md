@@ -128,9 +128,6 @@
   version notice now covers.
 - Eighteen page reads share one hook (`useApiRead`) for cancelling, discarding stale answers
   and error text.
-- Tests and documentation record how the API and the monitor worker behave when RabbitMQ is
-  unreachable at start, returns, or goes away while they run. Neither host starts without
-  the broker; `docs/architecture/messaging-and-workers.md` has the table.
 - Activity's per-account fill reads and the Plays search use new indexes (about 3.9 ms to
   0.06 ms and 5.8 ms to 0.4 ms on the benchmark journal).
 - The web app also requires every field the API always sends in Play execution, Play list
@@ -176,6 +173,11 @@
   exempt.
 - Activity pages, filters and counts are served in SQL from a per-account read model: at
   four times today's history a filtered page takes about 10 ms instead of 2.6 s.
+- RabbitMQ and Wolverine are removed. Events and Checks wake the workers through PostgreSQL
+  `LISTEN/NOTIFY`, with the 30-second catch-up as the safety net; the API and every worker
+  start with only PostgreSQL, and live delivery typically takes under 0.1 s. A broker outage
+  can no longer stop protection checks.
+- Newtonsoft.Json is pinned to 13.0.3, the version the images already shipped.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
@@ -212,8 +214,17 @@ Configuration: `Vessel:Worker:StaleExitAfter` (optional, 2 minutes to 2 hours, d
 Optional `Vessel:Database:LockTimeout` (default 10 seconds) and `Vessel:Database:StatementTimeout`
 (default 25 seconds, below the connection's `Command Timeout`); `check-config` validates them.
 Size PostgreSQL `max_connections` for two pools of `Maximum Pool Size` per API and worker
-process, plus Wolverine's pool and one paper-worker connection. PgBouncer drops or refuses the
-`options` startup parameter, so the limits do not apply behind it; see `deploy/README.md`.
+process, plus one listening connection per monitor, notifications or verification worker
+replica and one paper-worker connection. PgBouncer drops or refuses the `options` startup
+parameter, so the limits do not apply behind it, and a transaction-pooling PgBouncer does not
+pass `LISTEN/NOTIFY` (delivery then falls back to the catch-up); see `deploy/README.md`.
+
+RabbitMQ: the broker is gone. Keep a copy of the 0.4.2 deploy files and the broker lines of
+the operator's environment file for a rollback, then use this release's deploy files and
+`./vessel upgrade`. The leftover broker container, its volume and the Wolverine schemas are
+removed by hand later, as `deploy/README.md` ("Upgrade to 0.4.3") describes. The
+`RabbitMqUri`, `Prefix`, `DeliveryLimit` and `StorageSchemas` messaging settings are ignored
+if left in place.
 
 ## 0.4.2 - November 7, 2026
 
