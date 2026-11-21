@@ -51,9 +51,12 @@ git tag -a v0.4.2 -m "Vessel v0.4.2" origin/main
 git push origin v0.4.2
 ```
 
-The workflow checks that the tag, packaged versions and notes agree and that the
-upgrade manifest's migrations exist (`python3 scripts/release.py check --tag
-v0.4.2`), and runs the foundation checks.
+The workflow checks that the tag, packaged versions, the current-release
+examples in `README.md`, `deploy/README.md` and this file, and the notes agree,
+that the upgrade manifest's migrations exist (`python3 scripts/release.py check
+--tag v0.4.2`), and that the version's changelog section names as `#N` every
+pull request merged on `main` since the previous tag, so a pull request merged
+after release preparation stops the release. It then runs the foundation checks.
 It builds both images once (`release.py build`) and passes them, saved with
 `docker save`, as the `release-images` workflow artifact; each image's config
 digest travels separately as a job output. Both `scripts/verify-release.py`
@@ -379,7 +382,8 @@ temporary repositories cannot change yours.
 Other files (documentation, for example) run nothing. No test suites or
 database run, so a one-file change takes well under two minutes (a cold backend
 build is the slowest step, about 1.5 minutes). A pushed `v*` tag runs
-`python3 scripts/release.py check --tag <tag>` against the tagged commit's files.
+`python3 scripts/release.py check --tag <tag>` against the tagged commit's files
+and this clone's history.
 
 A check that runs and fails refuses the push. A check whose tool is missing is
 skipped, and the hook says which and why: no `node` or `pnpm`, frontend
@@ -390,6 +394,75 @@ before merging.
 
 To push without the hook on purpose, use `git push --no-verify`. The selection
 logic is `scripts/pre_push.py`, covered by `scripts/test_pre_push.py`.
+
+### Agent guardrails
+
+`.claude/settings.json` denies Claude Code sessions reading or editing `.env`
+files, forced pushes, `git push --tags` and `git tag -f`, and runs
+`scripts/agent_guard.py` before every tool call. A deny rule wins over the
+hook, so it lists only what the guard refuses in every session; Docker pushes,
+which the guard allows to a local registry and to an owner-authorized release,
+are left to the guard. For Codex, `.codex/hooks.json` runs the same guard
+before every tool call (shell commands and `apply_patch` edits), and
+`.codex/rules/vessel.rules` forbids the same force-push and tag-move prefixes
+as execpolicy rules. The guard refuses, with the reason:
+
+- `.env` files other than templates such as `.env.example`, Docker and GitHub
+  credential files, and printing the environment or a secret-looking variable
+  (`env`, `printenv`, `echo $..._TOKEN`, `gh auth token`);
+- `git push --force` or `-f` or a `+refspec` (use `--force-with-lease` on your
+  own branch), any lease push to or deletion of `main`, `--tags`, pushing a
+  release tag, moving or deleting one, and `git tag -f`;
+- `docker push`, buildx registry pushes, `imagetools create`, `release.py
+  publish` and `gh release create`/`edit`/`upload`/`delete`;
+- `pnpm db:migrate`, `dotnet ef database update`/`drop` without a throwaway
+  `--connection`, any command that names port 55432 or database `vessel`
+  together with `migrate`, `database update` or `psql`, and test runs whose
+  `Vessel_TEST_POSTGRES` names that database;
+- in the Compose project `vessel` (the root `compose.yaml`): `down -v`,
+  `exec`/`run`/`cp`, and deleting or pruning its volumes or opening its
+  containers;
+- `docker compose config` in any project unless it only lists (`--services`,
+  `--quiet`, ...) or adds `--no-interpolate`, and always with `--environment`:
+  Compose interpolates the `.env` beside the Compose file and the session
+  environment whatever `-p` or `--env-file` say.
+
+Commands are checked through wrappers (`sudo`, `env`, `timeout`, `xargs`,
+`nice`, `stdbuf`, `time`, `nohup`, `command`, `exec`), `sh -c`/`bash -lc`,
+`eval`, and here-documents, here-strings or `echo ...`/`printf ...` piped into a
+shell. Values that wrapper options take (`xargs -a`, `time -o`, `sudo -p`) are
+checked like any argument. A wrapper option the guard does not know, anything
+else piped into a shell, and `echo`/`printf` text with backslash escapes or
+`%` directives piped into a shell or interpreter are refused. A quoted
+here-document (`<<'EOF'`) for any other command is inert text, so
+`git commit -F - <<'EOF'` and `gh pr create --body-file - <<'EOF'` may mention
+anything; an unquoted one has its `$(...)` and secret-looking variables checked,
+and one for `python3`, `node` and similar may not name a `.env` file even in a
+string. To edit text that mentions one, use the Edit tool or `apply_patch`.
+
+Throwaway Compose projects with their own `-p` name, test containers,
+`scripts/test-db.sh`, `--force-with-lease` on feature branches, `gh pr` and
+`gh issue` stay allowed. For a release the owner authorizes, starting the
+session with `VESSEL_AGENT_RELEASE=1` lets it push one new release tag and
+publish; moving or deleting a tag stays refused. The guard stops accidents, not
+a script written to hide a command. Its rules, and their agreement with the
+deny rules and the Codex files, are tested by `scripts/test_agent_guard.py`.
+
+Codex loads project hooks and rules only from a project the owner has marked
+trusted, and asks the owner to review each new or changed hook before it runs
+(Codex 0.171 lists it as `untrusted` until then). In a Git worktree, Codex 0.171
+reads `.codex/hooks.json` from the main checkout rather than the worktree, so
+the hook applies to worktree sessions once it is on the main checkout; its
+command runs the guard of the worktree it is called from. These were checked
+with `codex app-server` (`hooks/list` on a temporary repository, its worktree
+and this checkout, with an empty `CODEX_HOME`); no Codex session ran a hook.
+
+Only the owner can set the matching GitHub repository settings:
+
+- a tag ruleset on `refs/tags/v*` that blocks updates (moving) and deletion,
+  with no bypass for agents' tokens;
+- `.github/CODEOWNERS` naming the owner for `.github/`, `deploy/` and
+  `scripts/release.py`, with code-owner review required on `main`.
 
 CI is defined in `.github/workflows/checks.yml`. Local execution does not establish that a remote GitHub run succeeded; no push is implied.
 

@@ -162,6 +162,15 @@
 - `AGENTS.md` now holds only current rules. Dated history moved verbatim to
   `docs/decisions.md`, area rules to `backend/`, `frontend/` and `deploy/AGENTS.md`, checked
   by `scripts/check_decision_log.py`.
+- Agent sessions (Claude Code through `.claude/settings.json`, Codex through `.codex/`) run
+  `scripts/agent_guard.py` before each command and refuse reading or printing `.env` files
+  and secrets, force pushes and tag pushes or moves, image publishing, migrating or querying
+  the development database, and destructive commands against the owner's Compose project,
+  including through wrappers, shells, here-documents and pipes.
+- `scripts/release.py check` compares the current-release examples in the docs, and with
+  `--tag` refuses a changelog section that does not name, as `#N`, every pull request merged
+  since the previous tag; the release pull request (the one that adds the release notes) is
+  exempt.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and

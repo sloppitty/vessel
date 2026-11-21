@@ -1,0 +1,19 @@
+# Codex execpolicy rules for this repository: the same unconditional refusals as the deny rules in
+# .claude/settings.json. scripts/agent_guard.py, run by .codex/hooks.json, checks every other form.
+# Prefix rules match the command's first words only, so `git push origin --force` is left to the guard.
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--tags"]],
+    decision = "forbidden",
+    justification = "Force pushes and --tags are never run by agents. Use --force-with-lease on your own branch; push one release tag by name, only for a release.",
+    match = [["git", "push", "--force", "origin", "x"], ["git", "push", "-f"], ["git", "push", "--tags"]],
+    not_match = [["git", "push", "--force-with-lease", "origin", "x"], ["git", "push", "origin", "x"]],
+)
+
+prefix_rule(
+    pattern = ["git", "tag", ["-f", "--force"]],
+    decision = "forbidden",
+    justification = "Release tags are never moved; fix forward with the next patch version.",
+    match = [["git", "tag", "-f", "v0.4.2"]],
+    not_match = [["git", "tag", "-a", "v0.4.3", "-m", "x"]],
+)

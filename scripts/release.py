@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Release metadata checks and image publication for Vessel.
 
-`check` confirms that every packaged version agrees and that the version has a
-changelog entry, release notes and, from 0.4.3 on, an upgrade manifest
-(docs/releases/vX.Y.Z.upgrade.json, read by deploy/vessel upgrade from the API
-image) whose migrations exist in the source. `build` builds the Linux amd64 API and web
+`check` confirms that every packaged version and current-release docs example
+agrees and that the version has a changelog entry, release notes and, from 0.4.3
+on, an upgrade manifest (docs/releases/vX.Y.Z.upgrade.json, read by deploy/vessel
+upgrade from the API image) whose migrations exist in the source. With `--tag` it
+also refuses a changelog section that does not name, as `#N`, every pull request
+merged on main since the previous release tag. `build` builds the Linux amd64 API and web
 images once from one commit and saves them (`docker save`) with their config
 digests. `identify` recomputes those digests from a saved pair without building,
 so a later attempt of the same release run reuses the pair the first attempt
@@ -54,8 +56,9 @@ class ReleaseError(Exception):
 
 def packaged_versions(root):
     """Every place that states the release version, with what it states."""
-    def matches(path, pattern):
-        return re.findall(pattern, (root / path).read_text(), re.MULTILINE)
+    def matches(path, *patterns):
+        text = (root / path).read_text()
+        return [found for pattern in patterns for found in re.findall(pattern, text, re.MULTILINE)]
 
     found = {'frontend/package.json': [json.loads((root / 'frontend/package.json').read_text()).get('version')]}
     found['backend/Directory.Build.props'] = matches('backend/Directory.Build.props', r'<Version>([^<]*)</Version>')
@@ -63,7 +66,50 @@ def packaged_versions(root):
         found[file] = matches(file, r'^ARG VERSION=(\S*)$')
     found['deploy/compose.yaml'] = matches('deploy/compose.yaml', r'vessel:(?:api|web)-\$\{VESSEL_VERSION:-([^}]*)\}')
     found['deploy/.env.example'] = matches('deploy/.env.example', r'^VESSEL_VERSION=(\S*)$')
+    # Current-release examples in the docs. Older versions in upgrade history are left alone: only the
+    # newest "From vA to vB" heading must name this version.
+    found['README.md'] = matches('README.md', r'for the v(\S+) API and web', r'\[v(\S+) release notes\]',
+                                 r'docs/releases/v(\d\S*)\.md')
+    images = r'(?<![\w-])(?:api|web)-(\d+\.\d+\.\d+\S*?)[`\s]', r'--build-arg VERSION=(\S+)'
+    found['deploy/README.md'] = matches('deploy/README.md', *images,
+                                        r'\A(?:.*\n)*?### From v\S+ to v(\S+)$')
+    found['docs/development.md'] = matches('docs/development.md', *images, r'git tag -a v(\S+)',
+                                           r'git push origin v(\S+)', r'check --tag v(\S+?)`')
     return found
+
+
+def pull_request(subject):
+    """The pull request a first-parent commit on main merged, from its merge or squash subject, or None."""
+    found = re.match(r'Merge pull request #(\d+) ', subject) or re.search(r'\(#(\d+)\)\s*$', subject)
+    return int(found[1]) if found else None
+
+
+def unlisted_pull_requests(root, version, tag):
+    """Pull requests merged on main since the previous release tag that the version's changelog section does not
+    name as #N, with that tag. The release pull request itself, the one whose merge or squash commit adds the
+    version's release notes, is exempt."""
+    def git(*args):
+        result = subprocess.run(['git', *args], cwd=root, text=True, capture_output=True)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    if git('rev-parse', '--git-dir') is None:
+        raise ReleaseError(f'Cannot read the Git history of {root}; the changelog freeze check needs it')
+    revision = f'refs/tags/{tag}' if git('rev-parse', '--verify', '--quiet', f'refs/tags/{tag}^{{commit}}') else 'HEAD'
+    previous = git('describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', '--exclude', tag, revision)
+    if not previous:
+        return None, []  # The first release: nothing to compare against.
+    subjects = git('log', '--first-parent', '--format=%s', f'{previous}..{revision}')
+    if subjects is None:
+        raise ReleaseError(f'Cannot list the commits between {previous} and {tag}')
+    preparation = git('log', '--first-parent', '--diff-merges=first-parent', '--diff-filter=A', '--format=%s',
+                      f'{previous}..{revision}', '--', f'docs/releases/v{version}.md')
+    if preparation is None:
+        raise ReleaseError(f'Cannot find the commit that added the v{version} release notes')
+    exempt = {pull_request(subject) for subject in preparation.splitlines()}
+    numbers = {pull_request(subject) for subject in subjects.splitlines()} - exempt - {None}
+    text = (root / 'CHANGELOG.md').read_text()
+    section = re.search(rf'^## {re.escape(version)} - .*?(?=^## |\Z)', text, re.MULTILINE | re.DOTALL)[0]
+    return previous, sorted(n for n in numbers if not re.search(rf'#{n}(?!\d)', section))
 
 
 def check(root, tag=None):
@@ -88,6 +134,12 @@ def check(root, tag=None):
     manifests = upgrade_manifests(root)
     if release_key(version) >= FIRST_UPGRADE_MANIFEST and version not in manifests:
         raise ReleaseError(f'Upgrade manifest docs/releases/v{version}.upgrade.json is missing')
+    if tag is not None:
+        previous, unlisted = unlisted_pull_requests(root, version, tag)
+        if unlisted:
+            raise ReleaseError(f'CHANGELOG.md {version} does not mention pull requests merged since {previous}: '
+                               + ', '.join(f'#{n}' for n in unlisted) + '. Name each as #N in the entry for its '
+                               'change, or in a "Pull requests:" line when it changed nothing owner-facing.')
     return version
 
 

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'exec python3 \"$(git rev-parse --show-toplevel)/scripts/agent_guard.py\"'",
+            "timeout": 10,
+            "statusMessage": "Checking the call with scripts/agent_guard.py"
+          }
+        ]
+      }
+    ]
+  }
+}

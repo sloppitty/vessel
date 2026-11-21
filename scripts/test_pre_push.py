@@ -187,6 +187,14 @@ class GitRepoTests(unittest.TestCase):
         code, _ = self.main(f'refs/tags/v9.9.9 {tagged} refs/tags/v9.9.9 {ZERO}')
         self.assertEqual(code, 0)
 
+    def test_release_check_reads_the_history_of_the_pushing_repository(self):
+        # The changelog freeze check runs git from the extracted tree, which is not a repository.
+        tagged = self.commit('scripts/release.py',
+                             'import subprocess, sys\n'
+                             f'sys.exit(subprocess.run(["git", "cat-file", "-e", "{self.base}"]).returncode)\n')
+        code, stderr = self.main(f'refs/tags/v9.9.9 {tagged} refs/tags/v9.9.9 {ZERO}')
+        self.assertEqual(code, 0, stderr)
+
     def test_missing_tool_is_skipped_with_reason_and_does_not_refuse(self):
         head = self.commit('backend/a.cs')
         with mock.patch.object(pre_push, 'missing_tool', return_value='dotnet is not on PATH'), \
